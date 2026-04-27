@@ -1,0 +1,29 @@
+# OS/editor
+.DS_Store
+.idea/
+.vscode/
+
+# Local Claude/session state
+.claude/settings.local.json
+
+# Build outputs
+target/
+bin/
+out/
+dist/
+coverage/
+
+# Go
+*.test
+
+# Node
+node_modules/
+
+# Terraform/Azure local state
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# Logs and temp files
+*.log
+*.tmp

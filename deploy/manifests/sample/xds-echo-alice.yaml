@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: xds-echo
+  namespace: tenant-alice
+  labels:
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/managed-by: appnet-gateway-controller
+    app.kubernetes.io/name: istiod
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: control-plane
+      app.kubernetes.io/managed-by: appnet-gateway-controller
+      app.kubernetes.io/name: istiod
+      appnet.azure.com/tenant: alice
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: control-plane
+        app.kubernetes.io/managed-by: appnet-gateway-controller
+        app.kubernetes.io/name: istiod
+        appnet.azure.com/tenant: alice
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: xds-echo
+          image: akstraffic.azurecr.io/mgdgtw/xds-echo:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 15010
+              name: xds

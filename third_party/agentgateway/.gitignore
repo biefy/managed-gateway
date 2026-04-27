@@ -1,0 +1,11 @@
+.cursor
+/target
+.vscode
+.idea
+.run
+.DS_Store
+.venv
+*.local
+var/
+controller/_output
+controller/_test

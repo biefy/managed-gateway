@@ -1,0 +1,20 @@
+# Build forked istiod (pilot-discovery) from /third_party/istio.
+# We build from source rather than using upstream make targets so we can fix
+# the toolchain version and skip Istio's release plumbing.
+
+FROM golang:1.24 AS build
+ARG TARGETARCH
+ENV CGO_ENABLED=0 GO111MODULE=on GOPROXY=https://proxy.golang.org,direct
+WORKDIR /src
+COPY third_party/istio /src
+RUN GOOS=linux GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /out/pilot-discovery ./pilot/cmd/pilot-discovery
+# Bake in an empty mesh config so pilot-discovery doesn't fail on the default
+# `./etc/istio/config/mesh` path (we run from / in distroless).
+RUN mkdir -p /out/etc/istio/config && : > /out/etc/istio/config/mesh && : > /out/etc/istio/config/meshNetworks && chmod -R a+rX /out/etc
+
+FROM gcr.io/distroless/static:nonroot
+COPY --from=build /out/pilot-discovery /usr/local/bin/pilot-discovery
+COPY --from=build /out/etc /etc
+WORKDIR /
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/pilot-discovery"]
