@@ -1,0 +1,115 @@
+# Per-tenant controller manifests. Stamp this template once per tenant by
+# substituting __TENANT_NAME__ and __INFRA_NAMESPACE__:
+#
+#   sed -e 's/__TENANT_NAME__/alice/g' -e 's/__INFRA_NAMESPACE__/tenant-alice/g' \
+#       deploy/manifests/controller/per-tenant.yaml | kubectl --context aks-infra apply -f -
+#
+# Each tenant gets its own ServiceAccount, Role, RoleBinding, and Deployment
+# scoped to one namespace. There is no ClusterRole — the controller cannot
+# touch any other tenant's namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: appnet-gateway-controller
+  namespace: __INFRA_NAMESPACE__
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: appnet-gateway-controller
+  namespace: __INFRA_NAMESPACE__
+rules:
+  # Member kubeconfig + TLS Secrets live here.
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [serviceaccounts]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch, create, update, patch, delete]
+  # Leader-election lease.
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: appnet-gateway-controller
+  namespace: __INFRA_NAMESPACE__
+subjects:
+  - kind: ServiceAccount
+    name: appnet-gateway-controller
+    namespace: __INFRA_NAMESPACE__
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: appnet-gateway-controller
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: appnet-gateway-controller
+  namespace: __INFRA_NAMESPACE__
+  labels:
+    app.kubernetes.io/name: appnet-gateway-controller
+    appnet.azure.com/tenant: __TENANT_NAME__
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: appnet-gateway-controller
+      appnet.azure.com/tenant: __TENANT_NAME__
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: appnet-gateway-controller
+        appnet.azure.com/tenant: __TENANT_NAME__
+    spec:
+      serviceAccountName: appnet-gateway-controller
+      terminationGracePeriodSeconds: 15
+      containers:
+        - name: controller
+          image: akstraffic.azurecr.io/mgdgtw/controller:dev
+          imagePullPolicy: Always
+          args:
+            - --leader-elect=true
+            - --tenant-name=__TENANT_NAME__
+            - --infra-namespace=__INFRA_NAMESPACE__
+            - --member-kubeconfig-secret=__TENANT_NAME__-member-kubeconfig
+            - --platform=aks
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+            - --zap-log-level=info
+          ports:
+            - name: metrics
+              containerPort: 8080
+            - name: probe
+              containerPort: 8081
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: probe
+            initialDelaySeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: probe
+            initialDelaySeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits:   { cpu: 500m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: [ALL]
