@@ -2,7 +2,7 @@
 # We build from source rather than using upstream make targets so we can fix
 # the toolchain version and skip Istio's release plumbing.
 
-FROM golang:1.24 AS build
+FROM golang:1.25 AS build
 ARG TARGETARCH
 ENV CGO_ENABLED=0 GO111MODULE=on GOPROXY=https://proxy.golang.org,direct
 WORKDIR /src

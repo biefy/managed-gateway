@@ -19,10 +19,38 @@ metadata:
   namespace: demo
 spec:
   gatewayClassName: appnet
+  tls:
+    backend:
+      clientCertificateRef:
+        group: ""
+        kind: Secret
+        name: alice-backend-mtls
   listeners:
   - name: http
     port: 80
     protocol: HTTP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: echo-nginx
+  namespace: demo
+data:
+  nginx.conf: |
+    events {}
+    http {
+      server {
+        listen 8443 ssl;
+        ssl_certificate /etc/nginx/mtls/tls.crt;
+        ssl_certificate_key /etc/nginx/mtls/tls.key;
+        ssl_client_certificate /etc/nginx/mtls/ca.crt;
+        ssl_verify_client on;
+        location / {
+          add_header Content-Type text/plain;
+          return 200 'hello-from-alice';
+        }
+      }
+    }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -39,10 +67,24 @@ spec:
     spec:
       containers:
       - name: echo
-        image: hashicorp/http-echo:1.0
-        args: ["-text=hello-from-alice", "-listen=:8080"]
+        image: nginx:1.27-alpine
         ports:
-        - containerPort: 8080
+        - containerPort: 8443
+        volumeMounts:
+        - name: config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+          readOnly: true
+        - name: mtls
+          mountPath: /etc/nginx/mtls
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: echo-nginx
+      - name: mtls
+        secret:
+          secretName: echo-mtls-server
 ---
 apiVersion: v1
 kind: Service
@@ -52,8 +94,8 @@ metadata:
 spec:
   selector: { app: echo }
   ports:
-  - port: 8080
-    targetPort: 8080
+  - port: 8443
+    targetPort: 8443
     protocol: TCP
 ---
 apiVersion: gateway.networking.k8s.io/v1
@@ -71,4 +113,21 @@ spec:
         value: /
     backendRefs:
     - name: echo
-      port: 8080
+      port: 8443
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: BackendTLSPolicy
+metadata:
+  name: echo-mtls
+  namespace: demo
+spec:
+  targetRefs:
+  - group: ""
+    kind: Service
+    name: echo
+  validation:
+    caCertificateRefs:
+    - group: ""
+      kind: ConfigMap
+      name: alice-backend-mtls
+    hostname: echo.demo.svc.cluster.local

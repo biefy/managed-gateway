@@ -13,7 +13,6 @@ import (
 	k8sioapiextensionsapiserverpkgapisapiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	sigsk8siogatewayapiapisv1 "sigs.k8s.io/gateway-api/apis/v1"
 	sigsk8siogatewayapiapisv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
-	sigsk8siogatewayapiapisv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
 	istioioapiextensionsv1alpha1 "istio.io/api/extensions/v1alpha1"
 	istioioapimeshv1alpha1 "istio.io/api/mesh/v1alpha1"
@@ -37,6 +36,8 @@ func getGvk(obj any) (config.GroupVersionKind, bool) {
 		return gvk.AuthorizationPolicy, true
 	case *apiistioioapisecurityv1.AuthorizationPolicy:
 		return gvk.AuthorizationPolicy, true
+	case *sigsk8siogatewayapiapisv1.BackendTLSPolicy:
+		return gvk.BackendTLSPolicy, true
 	case *k8sioapicertificatesv1.CertificateSigningRequest:
 		return gvk.CertificateSigningRequest, true
 	case *k8sioapicorev1.ConfigMap:
@@ -65,18 +66,20 @@ func getGvk(obj any) (config.GroupVersionKind, bool) {
 		return gvk.Gateway, true
 	case *apiistioioapinetworkingv1.Gateway:
 		return gvk.Gateway, true
-	case *sigsk8siogatewayapiapisv1beta1.GatewayClass:
+	case *sigsk8siogatewayapiapisv1.GatewayClass:
 		return gvk.GatewayClass, true
-	case *sigsk8siogatewayapiapisv1beta1.HTTPRoute:
+	case *sigsk8siogatewayapiapisv1.HTTPRoute:
 		return gvk.HTTPRoute, true
 	case *k8sioapinetworkingv1.Ingress:
 		return gvk.Ingress, true
 	case *k8sioapinetworkingv1.IngressClass:
 		return gvk.IngressClass, true
-	case *sigsk8siogatewayapiapisv1beta1.Gateway:
+	case *sigsk8siogatewayapiapisv1.Gateway:
 		return gvk.KubernetesGateway, true
 	case *k8sioapicoordinationv1.Lease:
 		return gvk.Lease, true
+	case *sigsk8siogatewayapiapisv1.ListenerSet:
+		return gvk.ListenerSet, true
 	case *istioioapimeshv1alpha1.MeshConfig:
 		return gvk.MeshConfig, true
 	case *istioioapimeshv1alpha1.MeshNetworks:
@@ -97,7 +100,7 @@ func getGvk(obj any) (config.GroupVersionKind, bool) {
 		return gvk.ProxyConfig, true
 	case *apiistioioapinetworkingv1beta1.ProxyConfig:
 		return gvk.ProxyConfig, true
-	case *sigsk8siogatewayapiapisv1beta1.ReferenceGrant:
+	case *sigsk8siogatewayapiapisv1.ReferenceGrant:
 		return gvk.ReferenceGrant, true
 	case *istioioapisecurityv1beta1.RequestAuthentication:
 		return gvk.RequestAuthentication, true
@@ -121,7 +124,7 @@ func getGvk(obj any) (config.GroupVersionKind, bool) {
 		return gvk.StatefulSet, true
 	case *sigsk8siogatewayapiapisv1alpha2.TCPRoute:
 		return gvk.TCPRoute, true
-	case *sigsk8siogatewayapiapisv1alpha2.TLSRoute:
+	case *sigsk8siogatewayapiapisv1.TLSRoute:
 		return gvk.TLSRoute, true
 	case *istioioapitelemetryv1alpha1.Telemetry:
 		return gvk.Telemetry, true

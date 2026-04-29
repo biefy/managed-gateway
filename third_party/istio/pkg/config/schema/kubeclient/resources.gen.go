@@ -27,7 +27,6 @@ import (
 	k8sioapiextensionsapiserverpkgapisapiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	sigsk8siogatewayapiapisv1 "sigs.k8s.io/gateway-api/apis/v1"
 	sigsk8siogatewayapiapisv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
-	sigsk8siogatewayapiapisv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
 	apiistioioapiextensionsv1alpha1 "istio.io/client-go/pkg/apis/extensions/v1alpha1"
 	apiistioioapinetworkingv1 "istio.io/client-go/pkg/apis/networking/v1"
@@ -41,6 +40,8 @@ func GetWriteClient[T runtime.Object](c ClientGetter, namespace string) ktypes.W
 	switch any(ptr.Empty[T]()).(type) {
 	case *apiistioioapisecurityv1.AuthorizationPolicy:
 		return c.Istio().SecurityV1().AuthorizationPolicies(namespace).(ktypes.WriteAPI[T])
+	case *sigsk8siogatewayapiapisv1.BackendTLSPolicy:
+		return c.GatewayAPI().GatewayV1().BackendTLSPolicies(namespace).(ktypes.WriteAPI[T])
 	case *k8sioapicertificatesv1.CertificateSigningRequest:
 		return c.Kube().CertificatesV1().CertificateSigningRequests().(ktypes.WriteAPI[T])
 	case *k8sioapicorev1.ConfigMap:
@@ -63,18 +64,20 @@ func GetWriteClient[T runtime.Object](c ClientGetter, namespace string) ktypes.W
 		return c.GatewayAPI().GatewayV1().GRPCRoutes(namespace).(ktypes.WriteAPI[T])
 	case *apiistioioapinetworkingv1.Gateway:
 		return c.Istio().NetworkingV1().Gateways(namespace).(ktypes.WriteAPI[T])
-	case *sigsk8siogatewayapiapisv1beta1.GatewayClass:
-		return c.GatewayAPI().GatewayV1beta1().GatewayClasses().(ktypes.WriteAPI[T])
-	case *sigsk8siogatewayapiapisv1beta1.HTTPRoute:
-		return c.GatewayAPI().GatewayV1beta1().HTTPRoutes(namespace).(ktypes.WriteAPI[T])
+	case *sigsk8siogatewayapiapisv1.GatewayClass:
+		return c.GatewayAPI().GatewayV1().GatewayClasses().(ktypes.WriteAPI[T])
+	case *sigsk8siogatewayapiapisv1.HTTPRoute:
+		return c.GatewayAPI().GatewayV1().HTTPRoutes(namespace).(ktypes.WriteAPI[T])
 	case *k8sioapinetworkingv1.Ingress:
 		return c.Kube().NetworkingV1().Ingresses(namespace).(ktypes.WriteAPI[T])
 	case *k8sioapinetworkingv1.IngressClass:
 		return c.Kube().NetworkingV1().IngressClasses().(ktypes.WriteAPI[T])
-	case *sigsk8siogatewayapiapisv1beta1.Gateway:
-		return c.GatewayAPI().GatewayV1beta1().Gateways(namespace).(ktypes.WriteAPI[T])
+	case *sigsk8siogatewayapiapisv1.Gateway:
+		return c.GatewayAPI().GatewayV1().Gateways(namespace).(ktypes.WriteAPI[T])
 	case *k8sioapicoordinationv1.Lease:
 		return c.Kube().CoordinationV1().Leases(namespace).(ktypes.WriteAPI[T])
+	case *sigsk8siogatewayapiapisv1.ListenerSet:
+		return c.GatewayAPI().GatewayV1().ListenerSets(namespace).(ktypes.WriteAPI[T])
 	case *k8sioapiadmissionregistrationv1.MutatingWebhookConfiguration:
 		return c.Kube().AdmissionregistrationV1().MutatingWebhookConfigurations().(ktypes.WriteAPI[T])
 	case *k8sioapicorev1.Namespace:
@@ -87,8 +90,8 @@ func GetWriteClient[T runtime.Object](c ClientGetter, namespace string) ktypes.W
 		return c.Kube().CoreV1().Pods(namespace).(ktypes.WriteAPI[T])
 	case *apiistioioapinetworkingv1beta1.ProxyConfig:
 		return c.Istio().NetworkingV1beta1().ProxyConfigs(namespace).(ktypes.WriteAPI[T])
-	case *sigsk8siogatewayapiapisv1beta1.ReferenceGrant:
-		return c.GatewayAPI().GatewayV1beta1().ReferenceGrants(namespace).(ktypes.WriteAPI[T])
+	case *sigsk8siogatewayapiapisv1.ReferenceGrant:
+		return c.GatewayAPI().GatewayV1().ReferenceGrants(namespace).(ktypes.WriteAPI[T])
 	case *apiistioioapisecurityv1.RequestAuthentication:
 		return c.Istio().SecurityV1().RequestAuthentications(namespace).(ktypes.WriteAPI[T])
 	case *k8sioapicorev1.Secret:
@@ -105,8 +108,8 @@ func GetWriteClient[T runtime.Object](c ClientGetter, namespace string) ktypes.W
 		return c.Kube().AppsV1().StatefulSets(namespace).(ktypes.WriteAPI[T])
 	case *sigsk8siogatewayapiapisv1alpha2.TCPRoute:
 		return c.GatewayAPI().GatewayV1alpha2().TCPRoutes(namespace).(ktypes.WriteAPI[T])
-	case *sigsk8siogatewayapiapisv1alpha2.TLSRoute:
-		return c.GatewayAPI().GatewayV1alpha2().TLSRoutes(namespace).(ktypes.WriteAPI[T])
+	case *sigsk8siogatewayapiapisv1.TLSRoute:
+		return c.GatewayAPI().GatewayV1().TLSRoutes(namespace).(ktypes.WriteAPI[T])
 	case *apiistioioapitelemetryv1.Telemetry:
 		return c.Istio().TelemetryV1().Telemetries(namespace).(ktypes.WriteAPI[T])
 	case *sigsk8siogatewayapiapisv1alpha2.UDPRoute:
@@ -130,6 +133,8 @@ func GetClient[T, TL runtime.Object](c ClientGetter, namespace string) ktypes.Re
 	switch any(ptr.Empty[T]()).(type) {
 	case *apiistioioapisecurityv1.AuthorizationPolicy:
 		return c.Istio().SecurityV1().AuthorizationPolicies(namespace).(ktypes.ReadWriteAPI[T, TL])
+	case *sigsk8siogatewayapiapisv1.BackendTLSPolicy:
+		return c.GatewayAPI().GatewayV1().BackendTLSPolicies(namespace).(ktypes.ReadWriteAPI[T, TL])
 	case *k8sioapicertificatesv1.CertificateSigningRequest:
 		return c.Kube().CertificatesV1().CertificateSigningRequests().(ktypes.ReadWriteAPI[T, TL])
 	case *k8sioapicorev1.ConfigMap:
@@ -152,18 +157,20 @@ func GetClient[T, TL runtime.Object](c ClientGetter, namespace string) ktypes.Re
 		return c.GatewayAPI().GatewayV1().GRPCRoutes(namespace).(ktypes.ReadWriteAPI[T, TL])
 	case *apiistioioapinetworkingv1.Gateway:
 		return c.Istio().NetworkingV1().Gateways(namespace).(ktypes.ReadWriteAPI[T, TL])
-	case *sigsk8siogatewayapiapisv1beta1.GatewayClass:
-		return c.GatewayAPI().GatewayV1beta1().GatewayClasses().(ktypes.ReadWriteAPI[T, TL])
-	case *sigsk8siogatewayapiapisv1beta1.HTTPRoute:
-		return c.GatewayAPI().GatewayV1beta1().HTTPRoutes(namespace).(ktypes.ReadWriteAPI[T, TL])
+	case *sigsk8siogatewayapiapisv1.GatewayClass:
+		return c.GatewayAPI().GatewayV1().GatewayClasses().(ktypes.ReadWriteAPI[T, TL])
+	case *sigsk8siogatewayapiapisv1.HTTPRoute:
+		return c.GatewayAPI().GatewayV1().HTTPRoutes(namespace).(ktypes.ReadWriteAPI[T, TL])
 	case *k8sioapinetworkingv1.Ingress:
 		return c.Kube().NetworkingV1().Ingresses(namespace).(ktypes.ReadWriteAPI[T, TL])
 	case *k8sioapinetworkingv1.IngressClass:
 		return c.Kube().NetworkingV1().IngressClasses().(ktypes.ReadWriteAPI[T, TL])
-	case *sigsk8siogatewayapiapisv1beta1.Gateway:
-		return c.GatewayAPI().GatewayV1beta1().Gateways(namespace).(ktypes.ReadWriteAPI[T, TL])
+	case *sigsk8siogatewayapiapisv1.Gateway:
+		return c.GatewayAPI().GatewayV1().Gateways(namespace).(ktypes.ReadWriteAPI[T, TL])
 	case *k8sioapicoordinationv1.Lease:
 		return c.Kube().CoordinationV1().Leases(namespace).(ktypes.ReadWriteAPI[T, TL])
+	case *sigsk8siogatewayapiapisv1.ListenerSet:
+		return c.GatewayAPI().GatewayV1().ListenerSets(namespace).(ktypes.ReadWriteAPI[T, TL])
 	case *k8sioapiadmissionregistrationv1.MutatingWebhookConfiguration:
 		return c.Kube().AdmissionregistrationV1().MutatingWebhookConfigurations().(ktypes.ReadWriteAPI[T, TL])
 	case *k8sioapicorev1.Namespace:
@@ -176,8 +183,8 @@ func GetClient[T, TL runtime.Object](c ClientGetter, namespace string) ktypes.Re
 		return c.Kube().CoreV1().Pods(namespace).(ktypes.ReadWriteAPI[T, TL])
 	case *apiistioioapinetworkingv1beta1.ProxyConfig:
 		return c.Istio().NetworkingV1beta1().ProxyConfigs(namespace).(ktypes.ReadWriteAPI[T, TL])
-	case *sigsk8siogatewayapiapisv1beta1.ReferenceGrant:
-		return c.GatewayAPI().GatewayV1beta1().ReferenceGrants(namespace).(ktypes.ReadWriteAPI[T, TL])
+	case *sigsk8siogatewayapiapisv1.ReferenceGrant:
+		return c.GatewayAPI().GatewayV1().ReferenceGrants(namespace).(ktypes.ReadWriteAPI[T, TL])
 	case *apiistioioapisecurityv1.RequestAuthentication:
 		return c.Istio().SecurityV1().RequestAuthentications(namespace).(ktypes.ReadWriteAPI[T, TL])
 	case *k8sioapicorev1.Secret:
@@ -194,8 +201,8 @@ func GetClient[T, TL runtime.Object](c ClientGetter, namespace string) ktypes.Re
 		return c.Kube().AppsV1().StatefulSets(namespace).(ktypes.ReadWriteAPI[T, TL])
 	case *sigsk8siogatewayapiapisv1alpha2.TCPRoute:
 		return c.GatewayAPI().GatewayV1alpha2().TCPRoutes(namespace).(ktypes.ReadWriteAPI[T, TL])
-	case *sigsk8siogatewayapiapisv1alpha2.TLSRoute:
-		return c.GatewayAPI().GatewayV1alpha2().TLSRoutes(namespace).(ktypes.ReadWriteAPI[T, TL])
+	case *sigsk8siogatewayapiapisv1.TLSRoute:
+		return c.GatewayAPI().GatewayV1().TLSRoutes(namespace).(ktypes.ReadWriteAPI[T, TL])
 	case *apiistioioapitelemetryv1.Telemetry:
 		return c.Istio().TelemetryV1().Telemetries(namespace).(ktypes.ReadWriteAPI[T, TL])
 	case *sigsk8siogatewayapiapisv1alpha2.UDPRoute:
@@ -219,6 +226,8 @@ func gvrToObject(g schema.GroupVersionResource) runtime.Object {
 	switch g {
 	case gvr.AuthorizationPolicy:
 		return &apiistioioapisecurityv1.AuthorizationPolicy{}
+	case gvr.BackendTLSPolicy:
+		return &sigsk8siogatewayapiapisv1.BackendTLSPolicy{}
 	case gvr.CertificateSigningRequest:
 		return &k8sioapicertificatesv1.CertificateSigningRequest{}
 	case gvr.ConfigMap:
@@ -242,17 +251,19 @@ func gvrToObject(g schema.GroupVersionResource) runtime.Object {
 	case gvr.Gateway:
 		return &apiistioioapinetworkingv1.Gateway{}
 	case gvr.GatewayClass:
-		return &sigsk8siogatewayapiapisv1beta1.GatewayClass{}
+		return &sigsk8siogatewayapiapisv1.GatewayClass{}
 	case gvr.HTTPRoute:
-		return &sigsk8siogatewayapiapisv1beta1.HTTPRoute{}
+		return &sigsk8siogatewayapiapisv1.HTTPRoute{}
 	case gvr.Ingress:
 		return &k8sioapinetworkingv1.Ingress{}
 	case gvr.IngressClass:
 		return &k8sioapinetworkingv1.IngressClass{}
 	case gvr.KubernetesGateway:
-		return &sigsk8siogatewayapiapisv1beta1.Gateway{}
+		return &sigsk8siogatewayapiapisv1.Gateway{}
 	case gvr.Lease:
 		return &k8sioapicoordinationv1.Lease{}
+	case gvr.ListenerSet:
+		return &sigsk8siogatewayapiapisv1.ListenerSet{}
 	case gvr.MutatingWebhookConfiguration:
 		return &k8sioapiadmissionregistrationv1.MutatingWebhookConfiguration{}
 	case gvr.Namespace:
@@ -266,7 +277,7 @@ func gvrToObject(g schema.GroupVersionResource) runtime.Object {
 	case gvr.ProxyConfig:
 		return &apiistioioapinetworkingv1beta1.ProxyConfig{}
 	case gvr.ReferenceGrant:
-		return &sigsk8siogatewayapiapisv1beta1.ReferenceGrant{}
+		return &sigsk8siogatewayapiapisv1.ReferenceGrant{}
 	case gvr.RequestAuthentication:
 		return &apiistioioapisecurityv1.RequestAuthentication{}
 	case gvr.Secret:
@@ -284,7 +295,7 @@ func gvrToObject(g schema.GroupVersionResource) runtime.Object {
 	case gvr.TCPRoute:
 		return &sigsk8siogatewayapiapisv1alpha2.TCPRoute{}
 	case gvr.TLSRoute:
-		return &sigsk8siogatewayapiapisv1alpha2.TLSRoute{}
+		return &sigsk8siogatewayapiapisv1.TLSRoute{}
 	case gvr.Telemetry:
 		return &apiistioioapitelemetryv1.Telemetry{}
 	case gvr.UDPRoute:
@@ -315,6 +326,13 @@ func getInformerFiltered(c ClientGetter, opts ktypes.InformerOptions, g schema.G
 		}
 		w = func(options metav1.ListOptions) (watch.Interface, error) {
 			return c.Istio().SecurityV1().AuthorizationPolicies(opts.Namespace).Watch(context.Background(), options)
+		}
+	case gvr.BackendTLSPolicy:
+		l = func(options metav1.ListOptions) (runtime.Object, error) {
+			return c.GatewayAPI().GatewayV1().BackendTLSPolicies(opts.Namespace).List(context.Background(), options)
+		}
+		w = func(options metav1.ListOptions) (watch.Interface, error) {
+			return c.GatewayAPI().GatewayV1().BackendTLSPolicies(opts.Namespace).Watch(context.Background(), options)
 		}
 	case gvr.CertificateSigningRequest:
 		l = func(options metav1.ListOptions) (runtime.Object, error) {
@@ -395,17 +413,17 @@ func getInformerFiltered(c ClientGetter, opts ktypes.InformerOptions, g schema.G
 		}
 	case gvr.GatewayClass:
 		l = func(options metav1.ListOptions) (runtime.Object, error) {
-			return c.GatewayAPI().GatewayV1beta1().GatewayClasses().List(context.Background(), options)
+			return c.GatewayAPI().GatewayV1().GatewayClasses().List(context.Background(), options)
 		}
 		w = func(options metav1.ListOptions) (watch.Interface, error) {
-			return c.GatewayAPI().GatewayV1beta1().GatewayClasses().Watch(context.Background(), options)
+			return c.GatewayAPI().GatewayV1().GatewayClasses().Watch(context.Background(), options)
 		}
 	case gvr.HTTPRoute:
 		l = func(options metav1.ListOptions) (runtime.Object, error) {
-			return c.GatewayAPI().GatewayV1beta1().HTTPRoutes(opts.Namespace).List(context.Background(), options)
+			return c.GatewayAPI().GatewayV1().HTTPRoutes(opts.Namespace).List(context.Background(), options)
 		}
 		w = func(options metav1.ListOptions) (watch.Interface, error) {
-			return c.GatewayAPI().GatewayV1beta1().HTTPRoutes(opts.Namespace).Watch(context.Background(), options)
+			return c.GatewayAPI().GatewayV1().HTTPRoutes(opts.Namespace).Watch(context.Background(), options)
 		}
 	case gvr.Ingress:
 		l = func(options metav1.ListOptions) (runtime.Object, error) {
@@ -423,10 +441,10 @@ func getInformerFiltered(c ClientGetter, opts ktypes.InformerOptions, g schema.G
 		}
 	case gvr.KubernetesGateway:
 		l = func(options metav1.ListOptions) (runtime.Object, error) {
-			return c.GatewayAPI().GatewayV1beta1().Gateways(opts.Namespace).List(context.Background(), options)
+			return c.GatewayAPI().GatewayV1().Gateways(opts.Namespace).List(context.Background(), options)
 		}
 		w = func(options metav1.ListOptions) (watch.Interface, error) {
-			return c.GatewayAPI().GatewayV1beta1().Gateways(opts.Namespace).Watch(context.Background(), options)
+			return c.GatewayAPI().GatewayV1().Gateways(opts.Namespace).Watch(context.Background(), options)
 		}
 	case gvr.Lease:
 		l = func(options metav1.ListOptions) (runtime.Object, error) {
@@ -434,6 +452,13 @@ func getInformerFiltered(c ClientGetter, opts ktypes.InformerOptions, g schema.G
 		}
 		w = func(options metav1.ListOptions) (watch.Interface, error) {
 			return c.Kube().CoordinationV1().Leases(opts.Namespace).Watch(context.Background(), options)
+		}
+	case gvr.ListenerSet:
+		l = func(options metav1.ListOptions) (runtime.Object, error) {
+			return c.GatewayAPI().GatewayV1().ListenerSets(opts.Namespace).List(context.Background(), options)
+		}
+		w = func(options metav1.ListOptions) (watch.Interface, error) {
+			return c.GatewayAPI().GatewayV1().ListenerSets(opts.Namespace).Watch(context.Background(), options)
 		}
 	case gvr.MutatingWebhookConfiguration:
 		l = func(options metav1.ListOptions) (runtime.Object, error) {
@@ -479,10 +504,10 @@ func getInformerFiltered(c ClientGetter, opts ktypes.InformerOptions, g schema.G
 		}
 	case gvr.ReferenceGrant:
 		l = func(options metav1.ListOptions) (runtime.Object, error) {
-			return c.GatewayAPI().GatewayV1beta1().ReferenceGrants(opts.Namespace).List(context.Background(), options)
+			return c.GatewayAPI().GatewayV1().ReferenceGrants(opts.Namespace).List(context.Background(), options)
 		}
 		w = func(options metav1.ListOptions) (watch.Interface, error) {
-			return c.GatewayAPI().GatewayV1beta1().ReferenceGrants(opts.Namespace).Watch(context.Background(), options)
+			return c.GatewayAPI().GatewayV1().ReferenceGrants(opts.Namespace).Watch(context.Background(), options)
 		}
 	case gvr.RequestAuthentication:
 		l = func(options metav1.ListOptions) (runtime.Object, error) {
@@ -542,10 +567,10 @@ func getInformerFiltered(c ClientGetter, opts ktypes.InformerOptions, g schema.G
 		}
 	case gvr.TLSRoute:
 		l = func(options metav1.ListOptions) (runtime.Object, error) {
-			return c.GatewayAPI().GatewayV1alpha2().TLSRoutes(opts.Namespace).List(context.Background(), options)
+			return c.GatewayAPI().GatewayV1().TLSRoutes(opts.Namespace).List(context.Background(), options)
 		}
 		w = func(options metav1.ListOptions) (watch.Interface, error) {
-			return c.GatewayAPI().GatewayV1alpha2().TLSRoutes(opts.Namespace).Watch(context.Background(), options)
+			return c.GatewayAPI().GatewayV1().TLSRoutes(opts.Namespace).Watch(context.Background(), options)
 		}
 	case gvr.Telemetry:
 		l = func(options metav1.ListOptions) (runtime.Object, error) {

@@ -20,7 +20,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/gateway-api/apis/v1beta1"
+	gatewayapi "sigs.k8s.io/gateway-api/apis/v1"
 
 	"istio.io/api/annotation"
 	"istio.io/api/label"
@@ -202,7 +202,7 @@ func PodTLSMode(pod *corev1.Pod) string {
 // with TLS.Mode Passthrough.
 // For some backwards compatibility, we assume any listener with TLS specified and a port matching
 // 15443 (or the label-override for gateway port) is auto-passthrough as well.
-func IsAutoPassthrough(gwLabels map[string]string, l v1beta1.Listener) bool {
+func IsAutoPassthrough(gwLabels map[string]string, l gatewayapi.Listener) bool {
 	if l.TLS == nil {
 		return false
 	}
@@ -220,11 +220,11 @@ func IsAutoPassthrough(gwLabels map[string]string, l v1beta1.Listener) bool {
 	return fmt.Sprint(l.Port) == expectedPort
 }
 
-func hasListenerMode(l v1beta1.Listener, mode string) bool {
+func hasListenerMode(l gatewayapi.Listener, mode string) bool {
 	// TODO if we add a hybrid mode for detecting HBONE/passthrough, also check that here
 	return l.TLS != nil && l.TLS.Options != nil && string(l.TLS.Options[constants.ListenerModeOption]) == mode
 }
 
-func GatewaySA(gw *v1beta1.Gateway) string {
+func GatewaySA(gw *gatewayapi.Gateway) string {
 	return model.GetOrDefault(gw.GetAnnotations()[annotation.GatewayServiceAccount.Name], fmt.Sprintf("%s-%s", gw.Name, gw.Spec.GatewayClassName))
 }

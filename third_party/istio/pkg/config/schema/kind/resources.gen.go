@@ -10,6 +10,7 @@ import (
 const (
 	Address Kind = iota
 	AuthorizationPolicy
+	BackendTLSPolicy
 	CertificateSigningRequest
 	ConfigMap
 	CustomResourceDefinition
@@ -28,6 +29,7 @@ const (
 	IngressClass
 	KubernetesGateway
 	Lease
+	ListenerSet
 	MeshConfig
 	MeshNetworks
 	MutatingWebhookConfiguration
@@ -61,6 +63,8 @@ func (k Kind) String() string {
 		return "Address"
 	case AuthorizationPolicy:
 		return "AuthorizationPolicy"
+	case BackendTLSPolicy:
+		return "BackendTLSPolicy"
 	case CertificateSigningRequest:
 		return "CertificateSigningRequest"
 	case ConfigMap:
@@ -97,6 +101,8 @@ func (k Kind) String() string {
 		return "Gateway"
 	case Lease:
 		return "Lease"
+	case ListenerSet:
+		return "ListenerSet"
 	case MeshConfig:
 		return "MeshConfig"
 	case MeshNetworks:
@@ -156,6 +162,8 @@ func MustFromGVK(g config.GroupVersionKind) Kind {
 	switch g {
 	case gvk.AuthorizationPolicy:
 		return AuthorizationPolicy
+	case gvk.BackendTLSPolicy:
+		return BackendTLSPolicy
 	case gvk.CertificateSigningRequest:
 		return CertificateSigningRequest
 	case gvk.ConfigMap:
@@ -190,6 +198,8 @@ func MustFromGVK(g config.GroupVersionKind) Kind {
 		return KubernetesGateway
 	case gvk.Lease:
 		return Lease
+	case gvk.ListenerSet:
+		return ListenerSet
 	case gvk.MeshConfig:
 		return MeshConfig
 	case gvk.MeshNetworks:

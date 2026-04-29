@@ -18,7 +18,6 @@ import (
 	k8sioapiextensionsapiserverpkgapisapiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	sigsk8siogatewayapiapisv1 "sigs.k8s.io/gateway-api/apis/v1"
 	sigsk8siogatewayapiapisv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
-	sigsk8siogatewayapiapisv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
 	istioioapiextensionsv1alpha1 "istio.io/api/extensions/v1alpha1"
 	istioioapimeshv1alpha1 "istio.io/api/mesh/v1alpha1"
@@ -50,6 +49,24 @@ var (
 		Synthetic:     false,
 		Builtin:       false,
 		ValidateProto: validation.ValidateAuthorizationPolicy,
+	}.MustBuild()
+
+	BackendTLSPolicy = resource.Builder{
+		Identifier: "BackendTLSPolicy",
+		Group:      "gateway.networking.k8s.io",
+		Kind:       "BackendTLSPolicy",
+		Plural:     "backendtlspolicies",
+		Version:    "v1",
+		VersionAliases: []string{
+			"v1alpha3",
+		},
+		Proto: "k8s.io.gateway_api.api.v1alpha1.BackendTLSPolicySpec", StatusProto: "k8s.io.gateway_api.api.v1alpha1.PolicyStatus",
+		ReflectType: reflect.TypeOf(&sigsk8siogatewayapiapisv1.BackendTLSPolicySpec{}).Elem(), StatusType: reflect.TypeOf(&sigsk8siogatewayapiapisv1.PolicyStatus{}).Elem(),
+		ProtoPackage: "sigs.k8s.io/gateway-api/apis/v1", StatusPackage: "sigs.k8s.io/gateway-api/apis/v1",
+		ClusterScoped: false,
+		Synthetic:     false,
+		Builtin:       false,
+		ValidateProto: validation.EmptyValidate,
 	}.MustBuild()
 
 	CertificateSigningRequest = resource.Builder{
@@ -233,14 +250,14 @@ var (
 		Group:      "gateway.networking.k8s.io",
 		Kind:       "GatewayClass",
 		Plural:     "gatewayclasses",
-		Version:    "v1beta1",
+		Version:    "v1",
 		VersionAliases: []string{
 			"v1alpha2",
-			"v1",
+			"v1beta1",
 		},
 		Proto: "k8s.io.gateway_api.api.v1alpha1.GatewayClassSpec", StatusProto: "k8s.io.gateway_api.api.v1alpha1.GatewayClassStatus",
-		ReflectType: reflect.TypeOf(&sigsk8siogatewayapiapisv1beta1.GatewayClassSpec{}).Elem(), StatusType: reflect.TypeOf(&sigsk8siogatewayapiapisv1beta1.GatewayClassStatus{}).Elem(),
-		ProtoPackage: "sigs.k8s.io/gateway-api/apis/v1beta1", StatusPackage: "sigs.k8s.io/gateway-api/apis/v1beta1",
+		ReflectType: reflect.TypeOf(&sigsk8siogatewayapiapisv1.GatewayClassSpec{}).Elem(), StatusType: reflect.TypeOf(&sigsk8siogatewayapiapisv1.GatewayClassStatus{}).Elem(),
+		ProtoPackage: "sigs.k8s.io/gateway-api/apis/v1", StatusPackage: "sigs.k8s.io/gateway-api/apis/v1",
 		ClusterScoped: true,
 		Synthetic:     false,
 		Builtin:       false,
@@ -252,14 +269,14 @@ var (
 		Group:      "gateway.networking.k8s.io",
 		Kind:       "HTTPRoute",
 		Plural:     "httproutes",
-		Version:    "v1beta1",
+		Version:    "v1",
 		VersionAliases: []string{
 			"v1alpha2",
-			"v1",
+			"v1beta1",
 		},
 		Proto: "k8s.io.gateway_api.api.v1alpha1.HTTPRouteSpec", StatusProto: "k8s.io.gateway_api.api.v1alpha1.HTTPRouteStatus",
-		ReflectType: reflect.TypeOf(&sigsk8siogatewayapiapisv1beta1.HTTPRouteSpec{}).Elem(), StatusType: reflect.TypeOf(&sigsk8siogatewayapiapisv1beta1.HTTPRouteStatus{}).Elem(),
-		ProtoPackage: "sigs.k8s.io/gateway-api/apis/v1beta1", StatusPackage: "sigs.k8s.io/gateway-api/apis/v1beta1",
+		ReflectType: reflect.TypeOf(&sigsk8siogatewayapiapisv1.HTTPRouteSpec{}).Elem(), StatusType: reflect.TypeOf(&sigsk8siogatewayapiapisv1.HTTPRouteStatus{}).Elem(),
+		ProtoPackage: "sigs.k8s.io/gateway-api/apis/v1", StatusPackage: "sigs.k8s.io/gateway-api/apis/v1",
 		ClusterScoped: false,
 		Synthetic:     false,
 		Builtin:       false,
@@ -301,14 +318,14 @@ var (
 		Group:      "gateway.networking.k8s.io",
 		Kind:       "Gateway",
 		Plural:     "gateways",
-		Version:    "v1beta1",
+		Version:    "v1",
 		VersionAliases: []string{
 			"v1alpha2",
-			"v1",
+			"v1beta1",
 		},
 		Proto: "k8s.io.gateway_api.api.v1alpha1.GatewaySpec", StatusProto: "k8s.io.gateway_api.api.v1alpha1.GatewayStatus",
-		ReflectType: reflect.TypeOf(&sigsk8siogatewayapiapisv1beta1.GatewaySpec{}).Elem(), StatusType: reflect.TypeOf(&sigsk8siogatewayapiapisv1beta1.GatewayStatus{}).Elem(),
-		ProtoPackage: "sigs.k8s.io/gateway-api/apis/v1beta1", StatusPackage: "sigs.k8s.io/gateway-api/apis/v1beta1",
+		ReflectType: reflect.TypeOf(&sigsk8siogatewayapiapisv1.GatewaySpec{}).Elem(), StatusType: reflect.TypeOf(&sigsk8siogatewayapiapisv1.GatewayStatus{}).Elem(),
+		ProtoPackage: "sigs.k8s.io/gateway-api/apis/v1", StatusPackage: "sigs.k8s.io/gateway-api/apis/v1",
 		ClusterScoped: false,
 		Synthetic:     false,
 		Builtin:       false,
@@ -327,6 +344,21 @@ var (
 		ClusterScoped: false,
 		Synthetic:     false,
 		Builtin:       true,
+		ValidateProto: validation.EmptyValidate,
+	}.MustBuild()
+
+	ListenerSet = resource.Builder{
+		Identifier: "ListenerSet",
+		Group:      "gateway.networking.k8s.io",
+		Kind:       "ListenerSet",
+		Plural:     "listenersets",
+		Version:    "v1",
+		Proto:      "k8s.io.gateway_api.api.v1alpha1.ListenerSetSpec", StatusProto: "k8s.io.gateway_api.api.v1alpha1.ListenerSetStatus",
+		ReflectType: reflect.TypeOf(&sigsk8siogatewayapiapisv1.ListenerSetSpec{}).Elem(), StatusType: reflect.TypeOf(&sigsk8siogatewayapiapisv1.ListenerSetStatus{}).Elem(),
+		ProtoPackage: "sigs.k8s.io/gateway-api/apis/v1", StatusPackage: "sigs.k8s.io/gateway-api/apis/v1",
+		ClusterScoped: false,
+		Synthetic:     false,
+		Builtin:       false,
 		ValidateProto: validation.EmptyValidate,
 	}.MustBuild()
 
@@ -458,13 +490,14 @@ var (
 		Group:      "gateway.networking.k8s.io",
 		Kind:       "ReferenceGrant",
 		Plural:     "referencegrants",
-		Version:    "v1beta1",
+		Version:    "v1",
 		VersionAliases: []string{
 			"v1alpha2",
+			"v1beta1",
 		},
 		Proto:         "k8s.io.gateway_api.api.v1alpha1.ReferenceGrantSpec",
-		ReflectType:   reflect.TypeOf(&sigsk8siogatewayapiapisv1beta1.ReferenceGrantSpec{}).Elem(),
-		ProtoPackage:  "sigs.k8s.io/gateway-api/apis/v1beta1",
+		ReflectType:   reflect.TypeOf(&sigsk8siogatewayapiapisv1.ReferenceGrantSpec{}).Elem(),
+		ProtoPackage:  "sigs.k8s.io/gateway-api/apis/v1",
 		ClusterScoped: false,
 		Synthetic:     false,
 		Builtin:       false,
@@ -607,10 +640,13 @@ var (
 		Group:      "gateway.networking.k8s.io",
 		Kind:       "TLSRoute",
 		Plural:     "tlsroutes",
-		Version:    "v1alpha2",
-		Proto:      "k8s.io.gateway_api.api.v1alpha1.TLSRouteSpec", StatusProto: "k8s.io.gateway_api.api.v1alpha1.TLSRouteStatus",
-		ReflectType: reflect.TypeOf(&sigsk8siogatewayapiapisv1alpha2.TLSRouteSpec{}).Elem(), StatusType: reflect.TypeOf(&sigsk8siogatewayapiapisv1alpha2.TLSRouteStatus{}).Elem(),
-		ProtoPackage: "sigs.k8s.io/gateway-api/apis/v1alpha2", StatusPackage: "sigs.k8s.io/gateway-api/apis/v1alpha2",
+		Version:    "v1",
+		VersionAliases: []string{
+			"v1alpha2",
+		},
+		Proto: "k8s.io.gateway_api.api.v1alpha1.TLSRouteSpec", StatusProto: "k8s.io.gateway_api.api.v1alpha1.TLSRouteStatus",
+		ReflectType: reflect.TypeOf(&sigsk8siogatewayapiapisv1.TLSRouteSpec{}).Elem(), StatusType: reflect.TypeOf(&sigsk8siogatewayapiapisv1.TLSRouteStatus{}).Elem(),
+		ProtoPackage: "sigs.k8s.io/gateway-api/apis/v1", StatusPackage: "sigs.k8s.io/gateway-api/apis/v1",
 		ClusterScoped: false,
 		Synthetic:     false,
 		Builtin:       false,
@@ -740,6 +776,7 @@ var (
 	// All contains all collections in the system.
 	All = collection.NewSchemasBuilder().
 		MustAdd(AuthorizationPolicy).
+		MustAdd(BackendTLSPolicy).
 		MustAdd(CertificateSigningRequest).
 		MustAdd(ConfigMap).
 		MustAdd(CustomResourceDefinition).
@@ -757,6 +794,7 @@ var (
 		MustAdd(IngressClass).
 		MustAdd(KubernetesGateway).
 		MustAdd(Lease).
+		MustAdd(ListenerSet).
 		MustAdd(MeshConfig).
 		MustAdd(MeshNetworks).
 		MustAdd(MutatingWebhookConfiguration).
@@ -786,6 +824,7 @@ var (
 
 	// Kube contains only kubernetes collections.
 	Kube = collection.NewSchemasBuilder().
+		MustAdd(BackendTLSPolicy).
 		MustAdd(CertificateSigningRequest).
 		MustAdd(ConfigMap).
 		MustAdd(CustomResourceDefinition).
@@ -800,6 +839,7 @@ var (
 		MustAdd(IngressClass).
 		MustAdd(KubernetesGateway).
 		MustAdd(Lease).
+		MustAdd(ListenerSet).
 		MustAdd(MutatingWebhookConfiguration).
 		MustAdd(Namespace).
 		MustAdd(Node).
@@ -836,6 +876,7 @@ var (
 	// pilotGatewayAPI contains only collections used by Pilot, including the full Gateway API.
 	pilotGatewayAPI = collection.NewSchemasBuilder().
 			MustAdd(AuthorizationPolicy).
+			MustAdd(BackendTLSPolicy).
 			MustAdd(DestinationRule).
 			MustAdd(EnvoyFilter).
 			MustAdd(GRPCRoute).
@@ -843,6 +884,7 @@ var (
 			MustAdd(GatewayClass).
 			MustAdd(HTTPRoute).
 			MustAdd(KubernetesGateway).
+			MustAdd(ListenerSet).
 			MustAdd(PeerAuthentication).
 			MustAdd(ProxyConfig).
 			MustAdd(ReferenceGrant).
@@ -862,6 +904,7 @@ var (
 	// PilotStableGatewayAPI contains only collections used by Pilot, including beta+ Gateway API.
 	pilotStableGatewayAPI = collection.NewSchemasBuilder().
 				MustAdd(AuthorizationPolicy).
+				MustAdd(BackendTLSPolicy).
 				MustAdd(DestinationRule).
 				MustAdd(EnvoyFilter).
 				MustAdd(GRPCRoute).
@@ -869,12 +912,14 @@ var (
 				MustAdd(GatewayClass).
 				MustAdd(HTTPRoute).
 				MustAdd(KubernetesGateway).
+				MustAdd(ListenerSet).
 				MustAdd(PeerAuthentication).
 				MustAdd(ProxyConfig).
 				MustAdd(ReferenceGrant).
 				MustAdd(RequestAuthentication).
 				MustAdd(ServiceEntry).
 				MustAdd(Sidecar).
+				MustAdd(TLSRoute).
 				MustAdd(Telemetry).
 				MustAdd(VirtualService).
 				MustAdd(WasmPlugin).
