@@ -295,6 +295,10 @@ kc_infra -n tenant-alice rollout restart deploy/appnet-gateway-controller >/dev/
 kc_infra -n tenant-bob rollout restart deploy/appnet-gateway-controller >/dev/null
 kc_infra -n tenant-alice rollout status deploy/appnet-gateway-controller --timeout=300s >/dev/null
 kc_infra -n tenant-bob rollout status deploy/appnet-gateway-controller --timeout=300s >/dev/null
+kc_infra -n tenant-alice rollout restart deploy/istiod >/dev/null
+kc_infra -n tenant-bob rollout restart deploy/istiod >/dev/null
+kc_infra -n tenant-alice rollout status deploy/istiod --timeout=300s >/dev/null
+kc_infra -n tenant-bob rollout status deploy/istiod --timeout=300s >/dev/null
 
 if kc_infra -n tenant-alice get secret cacerts -o jsonpath='{.data.ca-cert\.pem}{.data.ca-key\.pem}{.data.root-cert\.pem}{.data.cert-chain\.pem}' | grep -q .; then ok "tenant-alice cacerts Secret synced"; else bad "tenant-alice cacerts Secret not synced"; fi
 if kc_infra -n tenant-bob get secret cacerts -o jsonpath='{.data.ca-cert\.pem}{.data.ca-key\.pem}{.data.root-cert\.pem}{.data.cert-chain\.pem}' | grep -q .; then ok "tenant-bob cacerts Secret synced"; else bad "tenant-bob cacerts Secret not synced"; fi
@@ -326,6 +330,10 @@ kc_bob -n istio-system rollout status deploy/eastwest-gateway --timeout=300s >/d
 kc_alice -n demo rollout status deploy/echo --timeout=300s >/dev/null
 kc_infra -n tenant-alice rollout status deploy/gw-demo-demo-gw --timeout=300s >/dev/null
 kc_infra -n tenant-bob rollout status deploy/gw-bob-demo-bob-gw --timeout=300s >/dev/null
+kc_infra -n tenant-alice rollout restart deploy/istiod >/dev/null
+kc_infra -n tenant-alice rollout status deploy/istiod --timeout=300s >/dev/null
+kc_infra -n tenant-alice rollout restart deploy/gw-demo-demo-gw >/dev/null
+kc_infra -n tenant-alice rollout status deploy/gw-demo-demo-gw --timeout=300s >/dev/null
 
 ALICE_EW_IP="$(wait_lb_ip aks-workload-alice istio-system eastwest-gateway || true)"
 BOB_EW_IP="$(wait_lb_ip aks-workload-bob istio-system eastwest-gateway || true)"

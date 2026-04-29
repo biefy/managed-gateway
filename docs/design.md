@@ -209,10 +209,10 @@ The Istiod generator uses this role to scope the xDS response to exactly one mem
 
 ## Gateway API translation
 
-The agentgateway xDS translator lives in:
+The agentgateway xDS translator lives in the `github.com/biefy/istio` fork at:
 
 ```text
-third_party/istio/pilot/pkg/xds/agentgateway_translate.go
+pilot/pkg/xds/agentgateway_translate.go
 ```
 
 It reads Gateway API config from Istiod's `ConfigStore` and emits `agentgateway.dev.resource.Resource` protobufs.
@@ -539,10 +539,10 @@ Conformance package compile check without running cluster tests:
 go test -tags conformance ./controller/internal/conformance -run '^$'
 ```
 
-Istio translator tests:
+Istio translator tests, run from a `github.com/biefy/istio` checkout:
 
 ```bash
-go -C third_party/istio test ./pilot/pkg/xds -run 'TestTranslate'
+go test ./pilot/pkg/xds -run 'TestTranslate'
 ```
 
 Full AKS E2E:

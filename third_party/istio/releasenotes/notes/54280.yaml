@@ -1,8 +1,0 @@
-apiVersion: release-notes/v2
-kind: bug-fix
-area: traffic-management
-issue:
- - 54280
-releaseNotes:
-- |
-  **Fixed** non-default revisions controlling gateways lacking istio.io/rev labels.

@@ -1,9 +1,0 @@
-apiVersion: security.istio.io/v1
-kind: AuthorizationPolicy
-metadata:
-  name: audit-all
-  namespace: foo
-spec:
-  action: AUDIT
-  rules:
-    - {}
