@@ -1,3 +1,0 @@
-cni:
-  cniConfDir: /var/snap/microk8s/current/args/cni-network
-  cniBinDir: /var/snap/microk8s/current/opt/cni/bin

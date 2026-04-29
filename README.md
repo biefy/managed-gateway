@@ -105,12 +105,15 @@ Member ztunnel and east-west gateway pods mount `istio-root-cert-keyvault` direc
 
 ## Forked upstreams
 
-This repo vendors two private fork snapshots under `third_party/`:
+This repo does not vendor the Istio or agentgateway forks. Fork-specific changes live in their own repositories:
 
-- Istio: `https://github.com/biefy/istio` at `267017f76122d4051289e7aa7e0b68c345dd5a71`
-- agentgateway: `https://github.com/biefy/agentgateway` at `2ad516159de189b20f753650468171b177de2a55`
+- Istio: `https://github.com/biefy/istio`
+- agentgateway: `https://github.com/biefy/agentgateway`
 
-See `third_party/README.md` for base commits and refresh instructions. The vendored directories are not git submodules.
+The image build scripts expect local checkouts of those forks and default to sibling paths:
+
+- `../biefy/istio` for `./hack/build-istiod.sh`; override with `ISTIO_DIR`.
+- `../biefy/agentgateway` for `./hack/build-agentgateway.sh`; override with `AGENTGATEWAY_DIR`.
 
 ## Production readiness
 
@@ -130,6 +133,4 @@ deploy/manifests/ambient/    ambient mesh and east-west gateway manifests
 deploy/manifests/controller/  per-tenant controller manifest template
 deploy/manifests/sample/      Alice/Bob sample Gateway API resources
 hack/                        image build scripts
-third_party/agentgateway/     pinned agentgateway source
-third_party/istio/            forked Istio source
 ```
