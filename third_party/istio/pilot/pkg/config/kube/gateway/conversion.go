@@ -30,7 +30,6 @@ import (
 	klabels "k8s.io/apimachinery/pkg/labels"
 	k8s "sigs.k8s.io/gateway-api/apis/v1"
 	k8salpha "sigs.k8s.io/gateway-api/apis/v1alpha2"
-	k8sbeta "sigs.k8s.io/gateway-api/apis/v1beta1"
 
 	"istio.io/api/annotation"
 	istio "istio.io/api/networking/v1alpha3"
@@ -103,12 +102,12 @@ func convertReferencePolicies(r GatewayResources) AllowedReferences {
 	res := map[Reference]map[Reference]*Grants{}
 	type namespacedGrant struct {
 		Namespace string
-		Grant     *k8sbeta.ReferenceGrantSpec
+		Grant     *k8s.ReferenceGrantSpec
 	}
 	specs := make([]namespacedGrant, 0, len(r.ReferenceGrant))
 
 	for _, obj := range r.ReferenceGrant {
-		rp := obj.Spec.(*k8sbeta.ReferenceGrantSpec)
+		rp := obj.Spec.(*k8s.ReferenceGrantSpec)
 		specs = append(specs, namespacedGrant{Namespace: obj.Namespace, Grant: rp})
 	}
 	for _, ng := range specs {
@@ -2323,7 +2322,7 @@ func reportUnmanagedGatewayStatus(obj config.Config) {
 	obj.Status.(*kstatus.WrappedStatus).Mutate(func(s config.Status) config.Status {
 		gs := s.(*k8s.GatewayStatus)
 		spec := obj.Spec.(*k8s.GatewaySpec)
-		gs.Addresses = slices.Map(spec.Addresses, func(e k8s.GatewayAddress) k8s.GatewayStatusAddress {
+		gs.Addresses = slices.Map(spec.Addresses, func(e k8s.GatewaySpecAddress) k8s.GatewayStatusAddress {
 			return k8s.GatewayStatusAddress(e)
 		})
 		gs.Listeners = nil
@@ -2489,7 +2488,7 @@ func listenerProtocolToIstio(protocol k8s.ProtocolType) string {
 	return string(protocol)
 }
 
-func buildTLS(ctx configContext, tls *k8s.GatewayTLSConfig, gw config.Config, isAutoPassthrough bool) (*istio.ServerTLSSettings, *ConfigError) {
+func buildTLS(ctx configContext, tls *k8s.ListenerTLSConfig, gw config.Config, isAutoPassthrough bool) (*istio.ServerTLSSettings, *ConfigError) {
 	if tls == nil {
 		return nil, nil
 	}

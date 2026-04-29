@@ -25,7 +25,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
-	"sigs.k8s.io/gateway-api/apis/v1beta1"
 
 	"istio.io/api/annotation"
 	"istio.io/api/label"
@@ -204,13 +203,13 @@ func (w Waypoint) ResourceName() string {
 }
 
 func (a *index) WaypointsCollection(
-	gateways krt.Collection[*v1beta1.Gateway],
-	gatewayClasses krt.Collection[*v1beta1.GatewayClass],
+	gateways krt.Collection[*gatewayv1.Gateway],
+	gatewayClasses krt.Collection[*gatewayv1.GatewayClass],
 	pods krt.Collection[*v1.Pod],
 	opts KrtOptions,
 ) krt.Collection[Waypoint] {
 	podsByNamespace := krt.NewNamespaceIndex(pods)
-	return krt.NewCollection(gateways, func(ctx krt.HandlerContext, gateway *v1beta1.Gateway) *Waypoint {
+	return krt.NewCollection(gateways, func(ctx krt.HandlerContext, gateway *gatewayv1.Gateway) *Waypoint {
 		if len(gateway.Status.Addresses) == 0 {
 			// gateway.Status.Addresses should only be populated once the Waypoint's deployment has at least 1 ready pod, it should never be removed after going ready
 			// ignore Kubernetes Gateways which aren't waypoints
@@ -245,7 +244,7 @@ func (a *index) WaypointsCollection(
 	}, opts.WithName("Waypoints")...)
 }
 
-func makeInboundBinding(gateway *v1beta1.Gateway, gatewayClass *v1beta1.GatewayClass) *InboundBinding {
+func makeInboundBinding(gateway *gatewayv1.Gateway, gatewayClass *gatewayv1.GatewayClass) *InboundBinding {
 	ann, ok := getGatewayOrGatewayClassAnnotation(gateway, gatewayClass)
 	if !ok {
 		return nil
@@ -287,7 +286,7 @@ func makeInboundBinding(gateway *v1beta1.Gateway, gatewayClass *v1beta1.GatewayC
 	}
 }
 
-func getGatewayOrGatewayClassAnnotation(gateway *v1beta1.Gateway, class *v1beta1.GatewayClass) (string, bool) {
+func getGatewayOrGatewayClassAnnotation(gateway *gatewayv1.Gateway, class *gatewayv1.GatewayClass) (string, bool) {
 	// Gateway > GatewayClass
 	an, ok := gateway.Annotations[annotation.AmbientWaypointInboundBinding.Name]
 	if ok {
@@ -303,8 +302,8 @@ func getGatewayOrGatewayClassAnnotation(gateway *v1beta1.Gateway, class *v1beta1
 }
 
 func (a *index) makeWaypoint(
-	gateway *v1beta1.Gateway,
-	gatewayClass *v1beta1.GatewayClass,
+	gateway *gatewayv1.Gateway,
+	gatewayClass *gatewayv1.GatewayClass,
 	serviceAccounts []string,
 	trafficType string,
 ) *Waypoint {
@@ -319,7 +318,7 @@ func (a *index) makeWaypoint(
 }
 
 type WaypointSelector struct {
-	FromNamespaces v1beta1.FromNamespaces
+	FromNamespaces gatewayv1.FromNamespaces
 	Selector       labels.Selector
 }
 
@@ -373,7 +372,7 @@ func (w *Waypoint) GetAddress() *workloadapi.GatewayAddress {
 	return w.Address
 }
 
-func makeAllowedRoutes(gateway *v1beta1.Gateway) WaypointSelector {
+func makeAllowedRoutes(gateway *gatewayv1.Gateway) WaypointSelector {
 	for _, l := range gateway.Spec.Listeners {
 		if l.Protocol == "HBONE" && l.Port == 15008 {
 			// This is our HBONE listener
@@ -394,9 +393,9 @@ func makeAllowedRoutes(gateway *v1beta1.Gateway) WaypointSelector {
 	}
 }
 
-func (a *index) getGatewayAddress(gw *v1beta1.Gateway) *workloadapi.GatewayAddress {
+func (a *index) getGatewayAddress(gw *gatewayv1.Gateway) *workloadapi.GatewayAddress {
 	for _, addr := range gw.Status.Addresses {
-		if addr.Type != nil && *addr.Type == v1beta1.HostnameAddressType {
+		if addr.Type != nil && *addr.Type == gatewayv1.HostnameAddressType {
 			// Prefer hostname from status, if we can find it.
 			// Hostnames are a more reliable lookup key than IP; hostname is already the unique key for services, and IPs can be re-allocated.
 			// Additionally, a destination can have multiple IPs, which makes handling more challenging. For example, was the IPv4 address
@@ -415,7 +414,7 @@ func (a *index) getGatewayAddress(gw *v1beta1.Gateway) *workloadapi.GatewayAddre
 	}
 	// Fallback to IP address
 	for _, addr := range gw.Status.Addresses {
-		if addr.Type != nil && *addr.Type == v1beta1.IPAddressType {
+		if addr.Type != nil && *addr.Type == gatewayv1.IPAddressType {
 			ip, err := netip.ParseAddr(addr.Value)
 			if err != nil {
 				log.Warnf("parsed invalid IP address %q: %v", addr.Value, err)

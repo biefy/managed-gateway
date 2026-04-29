@@ -10,7 +10,7 @@ ACR_NAME="${ACR_NAME:-akstraffic}"
 ACR_RESOURCE_ID="${ACR_RESOURCE_ID:-/subscriptions/bc7e0da9-5e4c-4a91-9252-9658837006cf/resourceGroups/aks_traffic_infra_rg/providers/Microsoft.ContainerRegistry/registries/akstraffic}"
 AKS_NODE_COUNT="${AKS_NODE_COUNT:-2}"
 AKS_NODE_VM_SIZE="${AKS_NODE_VM_SIZE:-Standard_D4ds_v5}"
-GATEWAY_API_VERSION="${GATEWAY_API_VERSION:-v1.2.1}"
+GATEWAY_API_VERSION="${GATEWAY_API_VERSION:-v1.5.0}"
 
 TENANT_ALICE_KV_IDENTITY="${TENANT_ALICE_KV_IDENTITY:-id-mgd-gtw-tenant-alice-kv}"
 TENANT_BOB_KV_IDENTITY="${TENANT_BOB_KV_IDENTITY:-id-mgd-gtw-tenant-bob-kv}"

@@ -28,8 +28,7 @@ import (
 	klabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
-	gateway "sigs.k8s.io/gateway-api/apis/v1beta1"
+	gateway "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/yaml"
 
 	"istio.io/api/annotation"
@@ -429,7 +428,7 @@ func translateInfraMeta[K ~string, V ~string](meta map[K]V) map[string]string {
 	return infra
 }
 
-func extractInfrastructureMetadata(gwInfra *gatewayv1.GatewayInfrastructure, isLabel bool, gw gateway.Gateway) map[string]string {
+func extractInfrastructureMetadata(gwInfra *gateway.GatewayInfrastructure, isLabel bool, gw gateway.Gateway) map[string]string {
 	if gwInfra != nil && isLabel && gwInfra.Labels != nil {
 		return translateInfraMeta(gwInfra.Labels)
 	}
@@ -536,7 +535,7 @@ func (d *DeploymentController) render(templateName string, mi TemplateInput) ([]
 }
 
 func (d *DeploymentController) setGatewayControllerVersion(gws gateway.Gateway) error {
-	patch := fmt.Sprintf(`{"apiVersion":"gateway.networking.k8s.io/v1beta1","kind":"Gateway","metadata":{"annotations":{"%s":"%d"}}}`,
+	patch := fmt.Sprintf(`{"apiVersion":"gateway.networking.k8s.io/v1","kind":"Gateway","metadata":{"annotations":{"%s":"%d"}}}`,
 		ControllerVersionAnnotation, ControllerVersion)
 
 	log.Debugf("applying %v", patch)

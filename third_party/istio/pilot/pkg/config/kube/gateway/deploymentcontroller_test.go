@@ -31,7 +31,6 @@ import (
 	kubeVersion "k8s.io/apimachinery/pkg/version"
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	k8s "sigs.k8s.io/gateway-api/apis/v1"
-	k8sbeta "sigs.k8s.io/gateway-api/apis/v1beta1"
 	"sigs.k8s.io/yaml"
 
 	"istio.io/api/annotation"
@@ -65,7 +64,7 @@ import (
 func TestConfigureIstioGateway(t *testing.T) {
 	discoveryNamespacesFilter := buildFilter("default")
 	defaultNamespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}}
-	customClass := &k8sbeta.GatewayClass{
+	customClass := &k8s.GatewayClass{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "custom",
 		},
@@ -130,7 +129,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 	proxyConfig := model.GetProxyConfigs(store, mesh.DefaultMeshConfig())
 	tests := []struct {
 		name                     string
-		gw                       k8sbeta.Gateway
+		gw                       k8s.Gateway
 		objects                  []runtime.Object
 		pcs                      *model.ProxyConfigs
 		values                   string
@@ -139,7 +138,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 	}{
 		{
 			name: "simple",
-			gw: k8sbeta.Gateway{
+			gw: k8s.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "default",
 					Namespace:   "default",
@@ -155,7 +154,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 		},
 		{
 			name: "simple",
-			gw: k8sbeta.Gateway{
+			gw: k8s.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "default",
 					Namespace: "default",
@@ -170,7 +169,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 		},
 		{
 			name: "manual-sa",
-			gw: k8sbeta.Gateway{
+			gw: k8s.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "default",
 					Namespace:   "default",
@@ -185,7 +184,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 		},
 		{
 			name: "manual-ip",
-			gw: k8sbeta.Gateway{
+			gw: k8s.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "default",
 					Namespace:   "default",
@@ -193,7 +192,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 				},
 				Spec: k8s.GatewaySpec{
 					GatewayClassName: k8s.ObjectName(features.GatewayAPIDefaultGatewayClass),
-					Addresses: []k8s.GatewayAddress{{
+					Addresses: []k8s.GatewaySpecAddress{{
 						Type:  func() *k8s.AddressType { x := k8s.IPAddressType; return &x }(),
 						Value: "1.2.3.4",
 					}},
@@ -204,7 +203,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 		},
 		{
 			name: "cluster-ip",
-			gw: k8sbeta.Gateway{
+			gw: k8s.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "default",
 					Namespace: "default",
@@ -227,7 +226,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 		},
 		{
 			name: "multinetwork",
-			gw: k8sbeta.Gateway{
+			gw: k8s.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "default",
 					Namespace:   "default",
@@ -248,7 +247,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 		},
 		{
 			name: "waypoint",
-			gw: k8sbeta.Gateway{
+			gw: k8s.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "namespace",
 					Namespace: "default",
@@ -273,7 +272,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 		},
 		{
 			name: "waypoint-no-network-label",
-			gw: k8sbeta.Gateway{
+			gw: k8s.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "namespace",
 					Namespace: "default",
@@ -295,7 +294,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 		},
 		{
 			name: "proxy-config-crd",
-			gw: k8sbeta.Gateway{
+			gw: k8s.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "default",
 					Namespace: "default",
@@ -309,7 +308,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 		},
 		{
 			name: "custom-class",
-			gw: k8sbeta.Gateway{
+			gw: k8s.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "default",
 					Namespace: "default",
@@ -322,7 +321,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 		},
 		{
 			name: "infrastructure-labels-annotations",
-			gw: k8sbeta.Gateway{
+			gw: k8s.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "default",
 					Namespace:   "default",
@@ -341,7 +340,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 		},
 		{
 			name: "kube-gateway-ambient-redirect",
-			gw: k8sbeta.Gateway{
+			gw: k8s.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "default",
 					Namespace: "default",
@@ -358,7 +357,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 		},
 		{
 			name: "kube-gateway-ambient-redirect-infra",
-			gw: k8sbeta.Gateway{
+			gw: k8s.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "default",
 					Namespace: "default",
@@ -376,7 +375,7 @@ func TestConfigureIstioGateway(t *testing.T) {
 		},
 		{
 			name: "istio-upgrade-to-1.24",
-			gw: k8sbeta.Gateway{
+			gw: k8s.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-upgrade",
 					Namespace: "default",
@@ -403,8 +402,8 @@ func TestConfigureIstioGateway(t *testing.T) {
 			client := kube.NewFakeClient(tt.objects...)
 			kube.SetObjectFilter(client, tt.discoveryNamespaceFilter)
 			client.Kube().Discovery().(*fakediscovery.FakeDiscovery).FakedServerVersion = &kubeVersion.Info{Major: "1", Minor: "28"}
-			kclient.NewWriteClient[*k8sbeta.GatewayClass](client).Create(customClass)
-			kclient.NewWriteClient[*k8sbeta.Gateway](client).Create(tt.gw.DeepCopy())
+			kclient.NewWriteClient[*k8s.GatewayClass](client).Create(customClass)
+			kclient.NewWriteClient[*k8s.Gateway](client).Create(tt.gw.DeepCopy())
 			kclient.NewWriteClient[*appsv1.Deployment](client).Create(upgradeDeployment)
 			stop := test.NewStop(t)
 			env := model.NewEnvironment()
@@ -502,7 +501,7 @@ func TestVersionManagement(t *testing.T) {
 	c.RunAndWait(stop)
 	kube.WaitForCacheSync("test", stop, d.queue.HasSynced)
 	// Create a gateway, we should mark our ownership
-	defaultGateway := &k8sbeta.Gateway{
+	defaultGateway := &k8s.Gateway{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "gw",
 			Namespace: "default",
@@ -599,7 +598,7 @@ global:
 }
 
 func buildPatch(version int) string {
-	return fmt.Sprintf(`apiVersion: gateway.networking.k8s.io/v1beta1
+	return fmt.Sprintf(`apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   annotations:
