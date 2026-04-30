@@ -205,9 +205,14 @@ for ctx in aks-workload-alice aks-workload-bob; do
   echo "==> Installing Gateway API CRDs into ${ctx}"
   kubectl --context "${ctx}" apply -f "${GATEWAY_API_URL}"
   kubectl --context "${ctx}" wait --for=condition=Established --timeout=120s \
+    crd/backendtlspolicies.gateway.networking.k8s.io \
+    crd/gatewayclasses.gateway.networking.k8s.io \
     crd/gateways.gateway.networking.k8s.io \
+    crd/grpcroutes.gateway.networking.k8s.io \
     crd/httproutes.gateway.networking.k8s.io \
-    crd/gatewayclasses.gateway.networking.k8s.io
+    crd/listenersets.gateway.networking.k8s.io \
+    crd/referencegrants.gateway.networking.k8s.io \
+    crd/tlsroutes.gateway.networking.k8s.io
  done
 
 echo "AKS clusters ready: aks-infra aks-workload-alice aks-workload-bob"

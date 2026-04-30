@@ -1,12 +1,11 @@
-# Build forked istiod (pilot-discovery) from /third_party/istio.
-# We build from source rather than using upstream make targets so we can fix
-# the toolchain version and skip Istio's release plumbing.
+# Build forked istiod (pilot-discovery) from a biefy/istio checkout used as
+# the Docker build context.
 
-FROM golang:1.24 AS build
+FROM golang:1.25 AS build
 ARG TARGETARCH
 ENV CGO_ENABLED=0 GO111MODULE=on GOPROXY=https://proxy.golang.org,direct
 WORKDIR /src
-COPY third_party/istio /src
+COPY . /src
 RUN GOOS=linux GOARCH=${TARGETARCH} go build -trimpath -ldflags="-s -w" -o /out/pilot-discovery ./pilot/cmd/pilot-discovery
 # Bake in an empty mesh config so pilot-discovery doesn't fail on the default
 # `./etc/istio/config/mesh` path (we run from / in distroless).

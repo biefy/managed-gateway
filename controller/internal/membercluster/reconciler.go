@@ -54,9 +54,14 @@ func Start(parent context.Context, cfg CacheConfig) (*Client, error) {
 	}
 
 	for _, obj := range []client.Object{
+		&gwapiv1.BackendTLSPolicy{},
+		&gwapiv1.GRPCRoute{},
 		&gwapiv1.Gateway{},
-		&gwapiv1.HTTPRoute{},
 		&gwapiv1.GatewayClass{},
+		&gwapiv1.HTTPRoute{},
+		&gwapiv1.ListenerSet{},
+		&gwapiv1.ReferenceGrant{},
+		&gwapiv1.TLSRoute{},
 	} {
 		if _, err := c.GetInformer(parent, obj); err != nil {
 			return nil, fmt.Errorf("get informer %T: %w", obj, err)
@@ -84,8 +89,35 @@ func Start(parent context.Context, cfg CacheConfig) (*Client, error) {
 		MemberKubeconfigName: cfg.MemberKubeconfigName,
 		MemberKubeconfigKey:  cfg.MemberKubeconfigKey,
 	}
-	if _, err := gwInformer.AddEventHandler(newGatewayHandler(parent, logger, deps)); err != nil {
+	processGateway := newGatewayProcessor(parent, logger, deps)
+	if _, err := gwInformer.AddEventHandler(newGatewayHandler(processGateway)); err != nil {
 		return nil, fmt.Errorf("add gateway handler: %w", err)
+	}
+	gcInformer, err := c.GetInformer(parent, &gwapiv1.GatewayClass{})
+	if err != nil {
+		return nil, err
+	}
+	processGatewayClass := newGatewayClassProcessor(parent, logger, cli)
+	if _, err := gcInformer.AddEventHandler(newGatewayClassHandler(processGatewayClass)); err != nil {
+		return nil, fmt.Errorf("add gatewayclass handler: %w", err)
+	}
+	refreshHandler := newGatewayRefreshHandler(parent, logger, cli, processGateway)
+	for _, obj := range []client.Object{
+		&gwapiv1.BackendTLSPolicy{},
+		&gwapiv1.GRPCRoute{},
+		&gwapiv1.GatewayClass{},
+		&gwapiv1.HTTPRoute{},
+		&gwapiv1.ListenerSet{},
+		&gwapiv1.ReferenceGrant{},
+		&gwapiv1.TLSRoute{},
+	} {
+		informer, err := c.GetInformer(parent, obj)
+		if err != nil {
+			return nil, fmt.Errorf("get informer %T: %w", obj, err)
+		}
+		if _, err := informer.AddEventHandler(refreshHandler); err != nil {
+			return nil, fmt.Errorf("add refresh handler %T: %w", obj, err)
+		}
 	}
 
 	go func() {

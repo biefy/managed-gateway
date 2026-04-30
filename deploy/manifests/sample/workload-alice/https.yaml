@@ -1,6 +1,6 @@
-# HTTPS variant of the alice member-cluster sample. The Gateway carries the
-# `appnet.azure.com/tls-cert` annotation naming an infra-cluster Secret;
-# the member cluster never holds cert material.
+# HTTPS variant of the alice member-cluster sample. certificateRefs name
+# infra-cluster Secrets mounted only into tenant Istiod; the member cluster never
+# holds frontend cert material.
 #
 # Apply with: kubectl --context aks-workload-alice apply -f https.yaml
 apiVersion: gateway.networking.k8s.io/v1
@@ -8,10 +8,14 @@ kind: Gateway
 metadata:
   name: demo-gw
   namespace: demo
-  annotations:
-    appnet.azure.com/tls-cert: alice-https-cert
 spec:
   gatewayClassName: appnet
+  tls:
+    backend:
+      clientCertificateRef:
+        group: ""
+        kind: Secret
+        name: alice-backend-mtls
   listeners:
   - name: http
     port: 80
@@ -22,10 +26,7 @@ spec:
     protocol: HTTPS
     tls:
       mode: Terminate
-      # Gateway-API CRD requires certificateRefs OR options under mode=Terminate.
-      # The member cluster has no Secret; the value here just satisfies the
-      # schema. The controller reads the cert NAME from the
-      # `appnet.azure.com/tls-cert` annotation above and resolves it to an
-      # infra-cluster Secret.
-      options:
-        appnet.azure.com/tls-cert: alice-https-cert
+      certificateRefs:
+      - group: ""
+        kind: Secret
+        name: alice-https-cert

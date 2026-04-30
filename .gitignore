@@ -13,6 +13,9 @@ out/
 dist/
 coverage/
 
+# External fork checkouts belong outside this repo
+third_party/
+
 # Go
 *.test
 

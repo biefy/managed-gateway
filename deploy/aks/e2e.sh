@@ -6,6 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
 require_azure_tools
+require_cmd openssl
 select_subscription
 
 fail=0
@@ -114,6 +115,36 @@ wait_curl_code() {
   return 1
 }
 
+run_alice_no_client_probe() {
+  local pod="mtls-probe"
+  kc_alice -n demo delete pod "${pod}" --ignore-not-found --wait=true >/dev/null 2>&1 || true
+  kc_alice -n demo run "${pod}" --restart=Never --image=curlimages/curl:8.10.1 --command -- sleep 3600 >/dev/null
+  if ! kc_alice -n demo wait --for=condition=Ready "pod/${pod}" --timeout=120s >/dev/null 2>&1; then
+    kc_alice -n demo delete pod "${pod}" --wait=false >/dev/null 2>&1 || true
+    echo "probe-not-ready"
+    return 0
+  fi
+  kc_alice -n demo exec "${pod}" -- curl -sk -o /dev/null -m 10 -w '%{http_code}' https://echo.demo.svc.cluster.local:8443/ 2>/dev/null || true
+  kc_alice -n demo delete pod "${pod}" --wait=false >/dev/null 2>&1 || true
+}
+
+install_gateway_api_crds() {
+  local url="https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/standard-install.yaml"
+  for ctx in aks-workload-alice aks-workload-bob; do
+    echo "==> Installing Gateway API ${GATEWAY_API_VERSION} Standard CRDs into ${ctx}"
+    kubectl --context "${ctx}" apply -f "${url}" >/dev/null
+    kubectl --context "${ctx}" wait --for=condition=Established --timeout=120s \
+      crd/backendtlspolicies.gateway.networking.k8s.io \
+      crd/gatewayclasses.gateway.networking.k8s.io \
+      crd/gateways.gateway.networking.k8s.io \
+      crd/grpcroutes.gateway.networking.k8s.io \
+      crd/httproutes.gateway.networking.k8s.io \
+      crd/listenersets.gateway.networking.k8s.io \
+      crd/referencegrants.gateway.networking.k8s.io \
+      crd/tlsroutes.gateway.networking.k8s.io >/dev/null
+  done
+}
+
 ensure_member_access() {
   local context="$1"
   kubectl --context "${context}" create namespace appnet-system --dry-run=client -o yaml \
@@ -174,8 +205,74 @@ ensure_ambient_namespace() {
   kubectl --context "${context}" label namespace "${namespace}" istio.io/dataplane-mode=ambient --overwrite >/dev/null
 }
 
+apply_alice_backend_mtls_assets() {
+  local tmp
+  tmp="$(mktemp -d)"
+
+  openssl req -x509 -newkey rsa:2048 -nodes \
+    -keyout "${tmp}/ca.key" \
+    -out "${tmp}/ca.crt" \
+    -days 365 \
+    -subj "/CN=alice-backend-mtls-ca" >/dev/null 2>&1
+
+  cat > "${tmp}/server.ext" <<'EOF'
+subjectAltName=DNS:echo.demo.svc.cluster.local,DNS:echo.demo.svc,DNS:echo
+extendedKeyUsage=serverAuth
+EOF
+  openssl genrsa -out "${tmp}/server.key" 2048 >/dev/null 2>&1
+  openssl req -new \
+    -key "${tmp}/server.key" \
+    -out "${tmp}/server.csr" \
+    -subj "/CN=echo.demo.svc.cluster.local" >/dev/null 2>&1
+  openssl x509 -req \
+    -in "${tmp}/server.csr" \
+    -CA "${tmp}/ca.crt" \
+    -CAkey "${tmp}/ca.key" \
+    -CAcreateserial \
+    -out "${tmp}/server.crt" \
+    -days 365 \
+    -sha256 \
+    -extfile "${tmp}/server.ext" >/dev/null 2>&1
+
+  cat > "${tmp}/client.ext" <<'EOF'
+extendedKeyUsage=clientAuth
+EOF
+  openssl genrsa -out "${tmp}/client.key" 2048 >/dev/null 2>&1
+  openssl req -new \
+    -key "${tmp}/client.key" \
+    -out "${tmp}/client.csr" \
+    -subj "/CN=managed-gateway-alice" >/dev/null 2>&1
+  openssl x509 -req \
+    -in "${tmp}/client.csr" \
+    -CA "${tmp}/ca.crt" \
+    -CAkey "${tmp}/ca.key" \
+    -CAcreateserial \
+    -out "${tmp}/client.crt" \
+    -days 365 \
+    -sha256 \
+    -extfile "${tmp}/client.ext" >/dev/null 2>&1
+
+  kc_alice -n demo create secret generic echo-mtls-server \
+    --from-file=tls.crt="${tmp}/server.crt" \
+    --from-file=tls.key="${tmp}/server.key" \
+    --from-file=ca.crt="${tmp}/ca.crt" \
+    --dry-run=client -o yaml | kc_alice apply -f - >/dev/null
+  kc_alice -n demo create configmap alice-backend-mtls \
+    --from-file=ca.crt="${tmp}/ca.crt" \
+    --dry-run=client -o yaml | kc_alice apply -f - >/dev/null
+  kc_infra -n tenant-alice create secret generic alice-backend-mtls \
+    --from-file=tls.crt="${tmp}/client.crt" \
+    --from-file=tls.key="${tmp}/client.key" \
+    --from-file=ca.crt="${tmp}/ca.crt" \
+    --dry-run=client -o yaml | kc_infra apply -f - >/dev/null
+
+  rm -rf "${tmp}"
+}
+
 echo "==> Materialize CA bundle from Key Vault"
 bash "${SCRIPT_DIR}/ca.sh"
+
+install_gateway_api_crds
 
 if kc_infra -n tenant-alice get secretproviderclass cacerts-keyvault >/dev/null 2>&1; then ok "tenant-alice cacerts SecretProviderClass exists"; else bad "tenant-alice cacerts SecretProviderClass missing"; fi
 if kc_infra -n tenant-bob get secretproviderclass cacerts-keyvault >/dev/null 2>&1; then ok "tenant-bob cacerts SecretProviderClass exists"; else bad "tenant-bob cacerts SecretProviderClass missing"; fi
@@ -198,6 +295,10 @@ kc_infra -n tenant-alice rollout restart deploy/appnet-gateway-controller >/dev/
 kc_infra -n tenant-bob rollout restart deploy/appnet-gateway-controller >/dev/null
 kc_infra -n tenant-alice rollout status deploy/appnet-gateway-controller --timeout=300s >/dev/null
 kc_infra -n tenant-bob rollout status deploy/appnet-gateway-controller --timeout=300s >/dev/null
+kc_infra -n tenant-alice rollout restart deploy/istiod >/dev/null
+kc_infra -n tenant-bob rollout restart deploy/istiod >/dev/null
+kc_infra -n tenant-alice rollout status deploy/istiod --timeout=300s >/dev/null
+kc_infra -n tenant-bob rollout status deploy/istiod --timeout=300s >/dev/null
 
 if kc_infra -n tenant-alice get secret cacerts -o jsonpath='{.data.ca-cert\.pem}{.data.ca-key\.pem}{.data.root-cert\.pem}{.data.cert-chain\.pem}' | grep -q .; then ok "tenant-alice cacerts Secret synced"; else bad "tenant-alice cacerts Secret not synced"; fi
 if kc_infra -n tenant-bob get secret cacerts -o jsonpath='{.data.ca-cert\.pem}{.data.ca-key\.pem}{.data.root-cert\.pem}{.data.cert-chain\.pem}' | grep -q .; then ok "tenant-bob cacerts Secret synced"; else bad "tenant-bob cacerts Secret not synced"; fi
@@ -215,17 +316,24 @@ echo "==> Apply tenant sample resources"
 ensure_ambient_namespace aks-workload-alice demo
 ensure_ambient_namespace aks-workload-bob bob-demo
 kc_infra apply -f "${REPO_ROOT}/deploy/manifests/sample/tls/alice-https-cert.yaml" >/dev/null
+apply_alice_backend_mtls_assets
 kc_alice apply -f "${REPO_ROOT}/deploy/manifests/sample/workload-alice/all.yaml" >/dev/null
 kc_alice apply -f "${REPO_ROOT}/deploy/manifests/sample/workload-alice/https.yaml" >/dev/null
 kc_bob apply -f "${REPO_ROOT}/deploy/manifests/sample/workload-bob/gateway.yaml" >/dev/null
+kc_alice -n demo rollout restart deploy/echo >/dev/null
 
 if wait_gateway_programmed aks-workload-alice demo demo-gw >/dev/null; then ok "demo-gw Programmed=True"; else bad "demo-gw Programmed=False"; fi
 if wait_gateway_programmed aks-workload-bob bob-demo bob-gw >/dev/null; then ok "bob-gw Programmed=True"; else bad "bob-gw Programmed=False"; fi
 
 kc_alice -n istio-system rollout status deploy/eastwest-gateway --timeout=300s >/dev/null
 kc_bob -n istio-system rollout status deploy/eastwest-gateway --timeout=300s >/dev/null
+kc_alice -n demo rollout status deploy/echo --timeout=300s >/dev/null
 kc_infra -n tenant-alice rollout status deploy/gw-demo-demo-gw --timeout=300s >/dev/null
 kc_infra -n tenant-bob rollout status deploy/gw-bob-demo-bob-gw --timeout=300s >/dev/null
+kc_infra -n tenant-alice rollout restart deploy/istiod >/dev/null
+kc_infra -n tenant-alice rollout status deploy/istiod --timeout=300s >/dev/null
+kc_infra -n tenant-alice rollout restart deploy/gw-demo-demo-gw >/dev/null
+kc_infra -n tenant-alice rollout status deploy/gw-demo-demo-gw --timeout=300s >/dev/null
 
 ALICE_EW_IP="$(wait_lb_ip aks-workload-alice istio-system eastwest-gateway || true)"
 BOB_EW_IP="$(wait_lb_ip aks-workload-bob istio-system eastwest-gateway || true)"
@@ -237,7 +345,11 @@ BOB_IP="$(wait_lb_ip aks-infra tenant-bob gw-bob-demo-bob-gw || true)"
 if [[ -n "${ALICE_IP}" ]] && ! is_private_ip "${ALICE_IP}"; then ok "alice managed gateway is public (${ALICE_IP})"; else bad "alice managed gateway IP is not public: ${ALICE_IP:-missing}"; fi
 if [[ -n "${BOB_IP}" ]] && ! is_private_ip "${BOB_IP}"; then ok "bob managed gateway is public (${BOB_IP})"; else bad "bob managed gateway IP is not public: ${BOB_IP:-missing}"; fi
 
-echo "==> Curl alice gateway: expect HTTP 200 + echo body"
+echo "==> Verify alice backend requires client certificate"
+no_client_code="$(run_alice_no_client_probe)"
+if [[ "${no_client_code}" == "000" || "${no_client_code}" == "400" || "${no_client_code}" == "495" || "${no_client_code}" == "496" ]]; then ok "alice backend rejects clients without cert"; else bad "alice backend accepted no-cert request with HTTP ${no_client_code}"; fi
+
+echo "==> Curl alice gateway: expect HTTP 200 + echo body over backend mTLS"
 body="$(wait_curl_body "hello-from-alice" -sS -m 10 "http://${ALICE_IP}/" || true)"
 if [[ "${body}" == "hello-from-alice" ]]; then ok "alice round-trip body OK"; else bad "alice body: ${body}"; fi
 

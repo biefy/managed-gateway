@@ -24,9 +24,8 @@ import (
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
-// TLSCertAnnotation is the workload Gateway annotation that names an
-// infra-cluster Secret to mount into istiod and use for HTTPS termination.
-// The Secret itself never lives in the member cluster.
+// TLSCertAnnotation is retained for existing manifests; Standard Gateway
+// listener certificateRefs are the preferred TLS certificate source.
 const TLSCertAnnotation = "appnet.azure.com/tls-cert"
 
 // TLSMountRoot is the directory under which per-cert Secrets are mounted in
@@ -70,10 +69,10 @@ type IstiodParams struct {
 	Replicas             int32
 	MemberKubeconfigName string // Secret name in Namespace
 	MemberKubeconfigKey  string // default "kubeconfig"
-	// TLSCertNames is the union of `appnet.azure.com/tls-cert` annotation
-	// values across every Gateway the controller renders for this tenant.
-	// Each name N is mounted at /var/run/tls/<N>/{tls.crt,tls.key} via the
-	// infra-cluster Secret of the same name. Member cluster never sees these.
+	// TLSCertNames is the union of listener certificateRef Secret names across
+	// every Gateway the controller renders for this tenant. Each name N is mounted
+	// at /var/run/tls/<N>/{tls.crt,tls.key} from the infra-cluster Secret of the
+	// same name. Member cluster never sees these.
 	TLSCertNames []string
 }
 
@@ -153,10 +152,6 @@ func IstiodDeployment(p IstiodParams) *appsv1.Deployment {
 				Secret: &corev1.SecretVolumeSource{
 					SecretName: n,
 					Optional:   &optional,
-					Items: []corev1.KeyToPath{
-						{Key: "tls.crt", Path: "tls.crt"},
-						{Key: "tls.key", Path: "tls.key"},
-					},
 				},
 			},
 		})
