@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -105,6 +106,35 @@ func TestMarkAcceptedSetsSupportedKinds(t *testing.T) {
 	}
 }
 
+func TestMarkListenerResolvedRefsSetsCondition(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := gwapiv1.Install(scheme); err != nil {
+		t.Fatal(err)
+	}
+	gw := &gwapiv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gw", Namespace: "app", Generation: 1},
+		Spec:       gwapiv1.GatewaySpec{Listeners: []gwapiv1.Listener{{Name: "https", Port: 443, Protocol: gwapiv1.HTTPSProtocolType}}},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(gw).WithStatusSubresource(&gwapiv1.Gateway{}).Build()
+	if err := MarkAccepted(ctx, c, gw); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := MarkListenerResolvedRefs(ctx, c, gw, "https", metav1.ConditionFalse, gwapiv1.ListenerReasonInvalidCertificateRef, "missing certificate"); err != nil {
+		t.Fatal(err)
+	}
+
+	var got gwapiv1.Gateway
+	if err := c.Get(ctx, clientKey("app", "gw"), &got); err != nil {
+		t.Fatal(err)
+	}
+	resolvedRefs := condition(got.Status.Listeners[0].Conditions, string(gwapiv1.ListenerConditionResolvedRefs))
+	if resolvedRefs == nil || resolvedRefs.Status != metav1.ConditionFalse || resolvedRefs.Reason != string(gwapiv1.ListenerReasonInvalidCertificateRef) {
+		t.Fatalf("listener ResolvedRefs condition = %#v", resolvedRefs)
+	}
+}
+
 func TestMarkProgrammedPreservesAccepted(t *testing.T) {
 	ctx := context.Background()
 	scheme := runtime.NewScheme()
@@ -147,6 +177,18 @@ func TestMarkProgrammedPreservesAccepted(t *testing.T) {
 	}
 	if conditionStatus(listener.Conditions, string(gwapiv1.ListenerConditionProgrammed)) != metav1.ConditionTrue {
 		t.Fatalf("listener Programmed condition not true: %#v", listener.Conditions)
+	}
+	if err := MarkAccepted(ctx, c, gw); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Get(ctx, clientKey("app", "gw"), &got); err != nil {
+		t.Fatal(err)
+	}
+	if conditionStatus(got.Status.Conditions, string(gwapiv1.GatewayConditionProgrammed)) != metav1.ConditionTrue {
+		t.Fatalf("gateway Programmed condition downgraded: %#v", got.Status.Conditions)
+	}
+	if conditionStatus(got.Status.Listeners[0].Conditions, string(gwapiv1.ListenerConditionProgrammed)) != metav1.ConditionTrue {
+		t.Fatalf("listener Programmed condition downgraded: %#v", got.Status.Listeners[0].Conditions)
 	}
 }
 
@@ -204,6 +246,195 @@ func TestMarkRoutesAcceptedSetsHTTPRouteParent(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Status.Parents, before) {
 		t.Fatalf("route parents changed on second update: %#v", got.Status.Parents)
+	}
+}
+
+func TestMarkRoutesAcceptedRejectsDisallowedNamespace(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := gwapiv1.Install(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	gw := &gwapiv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gw", Namespace: "app", Generation: 1},
+		Spec:       gwapiv1.GatewaySpec{Listeners: []gwapiv1.Listener{{Name: "http", Port: 80, Protocol: gwapiv1.HTTPProtocolType}}},
+	}
+	gwNS := gwapiv1.Namespace("app")
+	route := &gwapiv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "route", Namespace: "other", Generation: 1},
+		Spec: gwapiv1.HTTPRouteSpec{CommonRouteSpec: gwapiv1.CommonRouteSpec{ParentRefs: []gwapiv1.ParentReference{{
+			Name:      "gw",
+			Namespace: &gwNS,
+		}}}},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(gw, route).WithStatusSubresource(&gwapiv1.HTTPRoute{}).Build()
+
+	if err := MarkRoutesAccepted(ctx, c, gw); err != nil {
+		t.Fatal(err)
+	}
+
+	var got gwapiv1.HTTPRoute
+	if err := c.Get(ctx, clientKey("other", "route"), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Status.Parents) != 1 {
+		t.Fatalf("got %d route parents, want 1: %#v", len(got.Status.Parents), got.Status.Parents)
+	}
+	accepted := condition(got.Status.Parents[0].Conditions, string(gwapiv1.RouteConditionAccepted))
+	if accepted == nil || accepted.Status != metav1.ConditionFalse || accepted.Reason != string(gwapiv1.RouteReasonNotAllowedByListeners) {
+		t.Fatalf("route Accepted condition = %#v", accepted)
+	}
+}
+
+func TestMarkRoutesAcceptedAllowsNamespaceSelector(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := gwapiv1.Install(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	from := gwapiv1.NamespacesFromSelector
+	gwNS := gwapiv1.Namespace("app")
+	gw := &gwapiv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gw", Namespace: "app", Generation: 1},
+		Spec: gwapiv1.GatewaySpec{Listeners: []gwapiv1.Listener{{
+			Name:     "http",
+			Port:     80,
+			Protocol: gwapiv1.HTTPProtocolType,
+			AllowedRoutes: &gwapiv1.AllowedRoutes{Namespaces: &gwapiv1.RouteNamespaces{
+				From:     &from,
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"team": "allowed"}},
+			}},
+		}}},
+	}
+	route := &gwapiv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "route", Namespace: "other", Generation: 1},
+		Spec: gwapiv1.HTTPRouteSpec{CommonRouteSpec: gwapiv1.CommonRouteSpec{ParentRefs: []gwapiv1.ParentReference{{
+			Name:      "gw",
+			Namespace: &gwNS,
+		}}}},
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "other", Labels: map[string]string{"team": "allowed"}}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(gw, route, ns).WithStatusSubresource(&gwapiv1.HTTPRoute{}).Build()
+
+	if err := MarkRoutesAccepted(ctx, c, gw); err != nil {
+		t.Fatal(err)
+	}
+
+	var got gwapiv1.HTTPRoute
+	if err := c.Get(ctx, clientKey("other", "route"), &got); err != nil {
+		t.Fatal(err)
+	}
+	accepted := condition(got.Status.Parents[0].Conditions, string(gwapiv1.RouteConditionAccepted))
+	if accepted == nil || accepted.Status != metav1.ConditionTrue || accepted.Reason != string(gwapiv1.RouteReasonAccepted) {
+		t.Fatalf("route Accepted condition = %#v", accepted)
+	}
+}
+
+func TestMarkRoutesAcceptedAllowsBackendWithReferenceGrant(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := gwapiv1.Install(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	gw := &gwapiv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gw", Namespace: "app", Generation: 1},
+		Spec:       gwapiv1.GatewaySpec{Listeners: []gwapiv1.Listener{{Name: "http", Port: 80, Protocol: gwapiv1.HTTPProtocolType}}},
+	}
+	backendNS := gwapiv1.Namespace("backend")
+	backendPort := gwapiv1.PortNumber(8080)
+	route := &gwapiv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "route", Namespace: "app", Generation: 1},
+		Spec: gwapiv1.HTTPRouteSpec{
+			CommonRouteSpec: gwapiv1.CommonRouteSpec{ParentRefs: []gwapiv1.ParentReference{{Name: "gw"}}},
+			Rules: []gwapiv1.HTTPRouteRule{{
+				BackendRefs: []gwapiv1.HTTPBackendRef{{
+					BackendRef: gwapiv1.BackendRef{BackendObjectReference: gwapiv1.BackendObjectReference{
+						Name:      "api",
+						Namespace: &backendNS,
+						Port:      &backendPort,
+					}},
+				}},
+			}},
+		},
+	}
+	toName := gwapiv1.ObjectName("api")
+	grant := &gwapiv1.ReferenceGrant{
+		ObjectMeta: metav1.ObjectMeta{Name: "allow", Namespace: "backend"},
+		Spec: gwapiv1.ReferenceGrantSpec{
+			From: []gwapiv1.ReferenceGrantFrom{{Group: gwapiv1.Group(gwapiv1.GroupVersion.Group), Kind: "HTTPRoute", Namespace: "app"}},
+			To:   []gwapiv1.ReferenceGrantTo{{Group: "", Kind: "Service", Name: &toName}},
+		},
+	}
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "backend"},
+		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 8080}}},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(gw, route, grant, svc).WithStatusSubresource(&gwapiv1.HTTPRoute{}).Build()
+
+	if err := MarkRoutesAccepted(ctx, c, gw); err != nil {
+		t.Fatal(err)
+	}
+
+	var got gwapiv1.HTTPRoute
+	if err := c.Get(ctx, clientKey("app", "route"), &got); err != nil {
+		t.Fatal(err)
+	}
+	resolved := condition(got.Status.Parents[0].Conditions, string(gwapiv1.RouteConditionResolvedRefs))
+	if resolved == nil || resolved.Status != metav1.ConditionTrue || resolved.Reason != string(gwapiv1.RouteReasonResolvedRefs) {
+		t.Fatalf("route ResolvedRefs condition = %#v", resolved)
+	}
+}
+
+func TestMarkRoutesAcceptedReportsMissingBackend(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	if err := gwapiv1.Install(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	gw := &gwapiv1.Gateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gw", Namespace: "app", Generation: 1},
+		Spec:       gwapiv1.GatewaySpec{Listeners: []gwapiv1.Listener{{Name: "http", Port: 80, Protocol: gwapiv1.HTTPProtocolType}}},
+	}
+	backendPort := gwapiv1.PortNumber(8080)
+	route := &gwapiv1.HTTPRoute{
+		ObjectMeta: metav1.ObjectMeta{Name: "route", Namespace: "app", Generation: 1},
+		Spec: gwapiv1.HTTPRouteSpec{
+			CommonRouteSpec: gwapiv1.CommonRouteSpec{ParentRefs: []gwapiv1.ParentReference{{Name: "gw"}}},
+			Rules: []gwapiv1.HTTPRouteRule{{
+				BackendRefs: []gwapiv1.HTTPBackendRef{{
+					BackendRef: gwapiv1.BackendRef{BackendObjectReference: gwapiv1.BackendObjectReference{
+						Name: "missing",
+						Port: &backendPort,
+					}},
+				}},
+			}},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(gw, route).WithStatusSubresource(&gwapiv1.HTTPRoute{}).Build()
+
+	if err := MarkRoutesAccepted(ctx, c, gw); err != nil {
+		t.Fatal(err)
+	}
+
+	var got gwapiv1.HTTPRoute
+	if err := c.Get(ctx, clientKey("app", "route"), &got); err != nil {
+		t.Fatal(err)
+	}
+	resolved := condition(got.Status.Parents[0].Conditions, string(gwapiv1.RouteConditionResolvedRefs))
+	if resolved == nil || resolved.Status != metav1.ConditionFalse || resolved.Reason != string(gwapiv1.RouteReasonBackendNotFound) {
+		t.Fatalf("route ResolvedRefs condition = %#v", resolved)
 	}
 }
 

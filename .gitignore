@@ -12,6 +12,7 @@ bin/
 out/
 dist/
 coverage/
+/xds-echo
 
 # External fork checkouts belong outside this repo
 third_party/

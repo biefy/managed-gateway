@@ -36,11 +36,15 @@ const (
 	ManagedByLabel = "app.kubernetes.io/managed-by"
 	ManagedByValue = "appnet-gateway-controller"
 
-	TenantLabel  = "appnet.azure.com/tenant"
-	GatewayLabel = "appnet.azure.com/gateway"
+	TenantLabel                     = "appnet.azure.com/tenant"
+	GatewayLabel                    = "appnet.azure.com/gateway"
+	GatewayNamespaceLabel           = "appnet.azure.com/gateway-namespace"
+	GatewayNameAnnotation           = "appnet.azure.com/source-gateway-name"
+	GatewayNSAnnotation             = "appnet.azure.com/source-gateway-namespace"
+	MemberTokenExpirationAnnotation = "appnet.azure.com/member-token-expiration"
 
-	IstiodServicePort            = 15010 // plaintext xDS for agentgateway
-	IstiodSecureXDSPort          = 15012 // mTLS xDS/CA for ztunnel and HBONE gateways
+	IstiodServicePort            = 15010 // local plaintext xDS listener; not exposed by rendered Services
+	IstiodSecureXDSPort          = 15012 // mTLS xDS/CA for agentgateway, ztunnel, and HBONE gateways
 	AgentGatewayListen           = 80
 	AgentGatewayServiceAccount   = "agentgateway"
 	IstiodKeyVaultServiceAccount = "istiod-keyvault"
@@ -106,6 +110,37 @@ func tlsCertHash(names []string) string {
 	return hex.EncodeToString(h[:8])
 }
 
+func safeDNSLabel(parts ...string) string {
+	raw := strings.Join(parts, "-")
+	var b strings.Builder
+	for _, r := range strings.ToLower(raw) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	name := strings.Trim(b.String(), "-")
+	if name == "" {
+		name = "x"
+	}
+	return truncateWithHash(name, 63)
+}
+
+func safeLabelValue(raw string) string {
+	return truncateWithHash(raw, 63)
+}
+
+func truncateWithHash(raw string, maxLen int) string {
+	if len(raw) <= maxLen {
+		return raw
+	}
+	h := sha256.Sum256([]byte(raw))
+	suffix := hex.EncodeToString(h[:5])
+	keep := maxLen - len(suffix) - 1
+	return strings.TrimRight(raw[:keep], "-_.") + "-" + suffix
+}
+
 func defaultIstiodParams(p IstiodParams) IstiodParams {
 	if p.Image == "" {
 		p.Image = IstiodImage
@@ -144,14 +179,15 @@ func IstiodDeployment(p IstiodParams) *appsv1.Deployment {
 	tlsVolumes := make([]corev1.Volume, 0, len(certNames))
 	tlsMounts := make([]corev1.VolumeMount, 0, len(certNames))
 	optional := true
+	required := false
 	for _, n := range certNames {
-		volName := "tls-" + n
+		volName := safeDNSLabel("tls", n)
 		tlsVolumes = append(tlsVolumes, corev1.Volume{
 			Name: volName,
 			VolumeSource: corev1.VolumeSource{
 				Secret: &corev1.SecretVolumeSource{
 					SecretName: n,
-					Optional:   &optional,
+					Optional:   &required,
 				},
 			},
 		})
@@ -293,11 +329,6 @@ func IstiodService(p IstiodParams) *corev1.Service {
 		Spec: corev1.ServiceSpec{
 			Selector: labels,
 			Ports: []corev1.ServicePort{{
-				Name:       "grpc-xds",
-				Port:       IstiodServicePort,
-				TargetPort: intstr.FromInt(IstiodServicePort),
-				Protocol:   corev1.ProtocolTCP,
-			}, {
 				Name:       "grpc-xds-tls",
 				Port:       IstiodSecureXDSPort,
 				TargetPort: intstr.FromInt(IstiodSecureXDSPort),
@@ -314,13 +345,14 @@ func IstiodService(p IstiodParams) *corev1.Service {
 
 // GatewayParams are inputs for a per-Gateway agentgateway Deployment.
 type GatewayParams struct {
-	Tenant         string
-	InfraNamespace string
-	Platform       string
-	Gateway        *gwapiv1.Gateway
-	Image          string
-	IstiodDNS      string // e.g. istiod.tenant-alice.svc.cluster.local
-	IstiodPort     int32
+	Tenant          string
+	InfraNamespace  string
+	Platform        string
+	Gateway         *gwapiv1.Gateway
+	Image           string
+	IstiodDNS       string // e.g. istiod.tenant-alice.svc.cluster.local
+	IstiodPort      int32
+	TokenExpiration string
 }
 
 func defaultGatewayParams(p GatewayParams) GatewayParams {
@@ -328,12 +360,16 @@ func defaultGatewayParams(p GatewayParams) GatewayParams {
 		p.Image = AgentGatewayImage
 	}
 	if p.IstiodPort == 0 {
-		p.IstiodPort = IstiodServicePort
+		p.IstiodPort = IstiodSecureXDSPort
 	}
 	if p.IstiodDNS == "" {
 		p.IstiodDNS = fmt.Sprintf("istiod.%s.svc.cluster.local", p.InfraNamespace)
 	}
 	return p
+}
+
+func AgentGatewayLabels(tenant string, gw *gwapiv1.Gateway) map[string]string {
+	return agentGatewayLabels(tenant, gw.Namespace, gw.Name)
 }
 
 func agentGatewayLabels(tenant, gwNS, gwName string) map[string]string {
@@ -342,18 +378,30 @@ func agentGatewayLabels(tenant, gwNS, gwName string) map[string]string {
 		"app.kubernetes.io/component": "data-plane",
 		ManagedByLabel:                ManagedByValue,
 		TenantLabel:                   tenant,
-		GatewayLabel:                  fmt.Sprintf("%s.%s", gwName, gwNS),
+		GatewayLabel:                  safeLabelValue(fmt.Sprintf("%s.%s", gwName, gwNS)),
+		GatewayNamespaceLabel:         safeLabelValue(gwNS),
+	}
+}
+
+func AgentGatewayAnnotations(gw *gwapiv1.Gateway) map[string]string {
+	return agentGatewayAnnotations(gw.Namespace, gw.Name)
+}
+
+func agentGatewayAnnotations(gwNS, gwName string) map[string]string {
+	return map[string]string{
+		GatewayNSAnnotation:   gwNS,
+		GatewayNameAnnotation: gwName,
 	}
 }
 
 // AgentGatewayObjectName builds a stable infra-cluster name for a Gateway
-// defined in the member cluster: `gw-<gwNS>-<gwName>`.
+// defined in the member cluster: `gw-<gwNS>-<gwName>` when that fits.
 func AgentGatewayObjectName(gw *gwapiv1.Gateway) string {
-	return fmt.Sprintf("gw-%s-%s", gw.Namespace, gw.Name)
+	return safeDNSLabel("gw", gw.Namespace, gw.Name)
 }
 
 func AgentGatewayTokenSecretName(gw *gwapiv1.Gateway) string {
-	return AgentGatewayObjectName(gw) + "-token"
+	return safeDNSLabel("gw", gw.Namespace, gw.Name, "token")
 }
 
 func AgentGatewayServiceAccountObject(p GatewayParams) *corev1.ServiceAccount {
@@ -375,22 +423,28 @@ func AgentGatewayServiceAccountObject(p GatewayParams) *corev1.ServiceAccount {
 func AgentGatewayDeployment(p GatewayParams) *appsv1.Deployment {
 	p = defaultGatewayParams(p)
 	labels := agentGatewayLabels(p.Tenant, p.Gateway.Namespace, p.Gateway.Name)
+	annotations := agentGatewayAnnotations(p.Gateway.Namespace, p.Gateway.Name)
+	podAnnotations := maps.Clone(annotations)
+	if p.TokenExpiration != "" {
+		podAnnotations[MemberTokenExpirationAnnotation] = p.TokenExpiration
+	}
 	name := AgentGatewayObjectName(p.Gateway)
 	no := false
 	yes := true
 	replicas := int32(1)
-	runAsRoot := int64(0)
+	runAsUser := int64(1337)
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: p.InfraNamespace,
-			Labels:    labels,
+			Name:        name,
+			Namespace:   p.InfraNamespace,
+			Labels:      labels,
+			Annotations: annotations,
 		},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: labels},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: podAnnotations},
 				Spec: corev1.PodSpec{
 					AutomountServiceAccountToken: &no,
 					ServiceAccountName:           AgentGatewayServiceAccount,
@@ -399,7 +453,8 @@ func AgentGatewayDeployment(p GatewayParams) *appsv1.Deployment {
 						Image:           p.Image,
 						ImagePullPolicy: corev1.PullAlways,
 						Env: []corev1.EnvVar{
-							{Name: "XDS_ADDRESS", Value: fmt.Sprintf("http://%s:%d", p.IstiodDNS, p.IstiodPort)},
+							{Name: "XDS_ADDRESS", Value: fmt.Sprintf("https://%s:%d", p.IstiodDNS, p.IstiodPort)},
+							{Name: "XDS_ROOT_CA", Value: "/var/run/secrets/istio/root-cert.pem"},
 							{Name: "NAMESPACE", Value: p.Gateway.Namespace},
 							{Name: "GATEWAY", Value: p.Gateway.Name},
 							{Name: "CLUSTER_ID", Value: p.Tenant},
@@ -424,8 +479,11 @@ func AgentGatewayDeployment(p GatewayParams) *appsv1.Deployment {
 						},
 						SecurityContext: &corev1.SecurityContext{
 							AllowPrivilegeEscalation: &no,
-							RunAsNonRoot:             &no,
-							RunAsUser:                &runAsRoot,
+							ReadOnlyRootFilesystem:   &yes,
+							RunAsGroup:               &runAsUser,
+							RunAsNonRoot:             &yes,
+							RunAsUser:                &runAsUser,
+							SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 							Capabilities: &corev1.Capabilities{
 								Drop: []corev1.Capability{"ALL"},
 								Add:  []corev1.Capability{"NET_BIND_SERVICE"},
@@ -439,6 +497,9 @@ func AgentGatewayDeployment(p GatewayParams) *appsv1.Deployment {
 							Name:      "istiod-ca-cert",
 							MountPath: "/var/run/secrets/istio",
 							ReadOnly:  true,
+						}, {
+							Name:      "tmp",
+							MountPath: "/tmp",
 						}},
 					}},
 					Volumes: []corev1.Volume{{
@@ -457,13 +518,16 @@ func AgentGatewayDeployment(p GatewayParams) *appsv1.Deployment {
 						VolumeSource: corev1.VolumeSource{
 							Secret: &corev1.SecretVolumeSource{
 								SecretName: "cacerts",
-								Optional:   &yes,
+								Optional:   &no,
 								Items: []corev1.KeyToPath{{
 									Key:  "root-cert.pem",
 									Path: "root-cert.pem",
 								}},
 							},
 						},
+					}, {
+						Name:         "tmp",
+						VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 					}},
 				},
 			},
@@ -474,6 +538,7 @@ func AgentGatewayDeployment(p GatewayParams) *appsv1.Deployment {
 func AgentGatewayService(p GatewayParams) *corev1.Service {
 	p = defaultGatewayParams(p)
 	labels := agentGatewayLabels(p.Tenant, p.Gateway.Namespace, p.Gateway.Name)
+	annotations := agentGatewayAnnotations(p.Gateway.Namespace, p.Gateway.Name)
 
 	// Expose one Service port per unique listener port. agentgateway binds
 	// listener ports dynamically from xDS, so the Service is the only piece
@@ -516,9 +581,10 @@ func AgentGatewayService(p GatewayParams) *corev1.Service {
 
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      AgentGatewayObjectName(p.Gateway),
-			Namespace: p.InfraNamespace,
-			Labels:    labels,
+			Name:        AgentGatewayObjectName(p.Gateway),
+			Namespace:   p.InfraNamespace,
+			Labels:      labels,
+			Annotations: annotations,
 		},
 		Spec: corev1.ServiceSpec{
 			Selector: labels,

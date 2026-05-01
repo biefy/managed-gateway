@@ -26,7 +26,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: xds-echo
-          image: akstraffic.azurecr.io/mgdgtw/xds-echo:dev
+          image: managed-gateway/xds-echo:local
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 15010

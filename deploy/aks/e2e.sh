@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 source "${SCRIPT_DIR}/common.sh"
 
+CONTROLLER_IMAGE="${CONTROLLER_IMAGE:-managed-gateway/controller:local}"
+
 require_azure_tools
 require_cmd openssl
 select_subscription
@@ -151,11 +153,41 @@ ensure_member_access() {
     | kubectl --context "${context}" apply -f - >/dev/null
   kubectl --context "${context}" -n appnet-system create serviceaccount appnet-gateway-controller --dry-run=client -o yaml \
     | kubectl --context "${context}" apply -f - >/dev/null
-  kubectl --context "${context}" create clusterrolebinding appnet-gateway-controller \
-    --clusterrole=cluster-admin \
-    --serviceaccount=appnet-system:appnet-gateway-controller \
-    --dry-run=client -o yaml \
-    | kubectl --context "${context}" apply -f - >/dev/null
+  kubectl --context "${context}" apply -f - >/dev/null <<'EOF'
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: appnet-gateway-member-access
+rules:
+  - apiGroups: [""]
+    resources: [configmaps, endpoints, namespaces, nodes, pods, serviceaccounts, services]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch, update]
+  - apiGroups: [discovery.k8s.io]
+    resources: [endpointslices]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [backendtlspolicies, gatewayclasses, gateways, grpcroutes, httproutes, listenersets, referencegrants, tlsroutes]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gatewayclasses/status, gateways/status, grpcroutes/status, httproutes/status, listenersets/status, tlsroutes/status]
+    verbs: [get, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: appnet-gateway-member-access
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: appnet-gateway-member-access
+subjects:
+  - kind: ServiceAccount
+    name: appnet-gateway-controller
+    namespace: appnet-system
+EOF
 }
 
 create_member_kubeconfig_secret() {
@@ -287,9 +319,9 @@ create_member_kubeconfig_secret aks-workload-bob tenant-bob bob-member-kubeconfi
 
 echo "==> Stamp per-tenant controller manifests"
 PER_TENANT="${REPO_ROOT}/deploy/manifests/controller/per-tenant.yaml"
-sed -e 's/__TENANT_NAME__/alice/g' -e 's/__INFRA_NAMESPACE__/tenant-alice/g' "${PER_TENANT}" \
+sed -e 's/__TENANT_NAME__/alice/g' -e 's/__INFRA_NAMESPACE__/tenant-alice/g' -e "s#__CONTROLLER_IMAGE__#${CONTROLLER_IMAGE}#g" "${PER_TENANT}" \
   | kc_infra apply -f - >/dev/null
-sed -e 's/__TENANT_NAME__/bob/g' -e 's/__INFRA_NAMESPACE__/tenant-bob/g' "${PER_TENANT}" \
+sed -e 's/__TENANT_NAME__/bob/g' -e 's/__INFRA_NAMESPACE__/tenant-bob/g' -e "s#__CONTROLLER_IMAGE__#${CONTROLLER_IMAGE}#g" "${PER_TENANT}" \
   | kc_infra apply -f - >/dev/null
 kc_infra -n tenant-alice rollout restart deploy/appnet-gateway-controller >/dev/null
 kc_infra -n tenant-bob rollout restart deploy/appnet-gateway-controller >/dev/null

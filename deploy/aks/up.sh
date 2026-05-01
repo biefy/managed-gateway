@@ -92,13 +92,14 @@ ensure_nsg_public_gateway() {
     --source-address-prefixes Internet \
     --source-port-ranges '*' \
     --destination-address-prefixes 10.240.0.0/22 \
-    --destination-port-ranges 80 443 30000-32767 \
+    --destination-port-ranges 80 443 \
     --output none
 }
 
 ensure_nsg_load_balancer() {
   local resource_group="$1"
   local nsg_name="$2"
+  local destination_ports=(${AZURE_LOAD_BALANCER_DESTINATION_PORTS:-80 443})
   az network nsg rule create \
     --resource-group "${resource_group}" \
     --nsg-name "${nsg_name}" \
@@ -110,7 +111,7 @@ ensure_nsg_load_balancer() {
     --source-address-prefixes AzureLoadBalancer \
     --source-port-ranges '*' \
     --destination-address-prefixes 10.240.0.0/16 \
-    --destination-port-ranges 80 443 30000-32767 \
+    --destination-port-ranges "${destination_ports[@]}" \
     --output none
 }
 

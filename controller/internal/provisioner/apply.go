@@ -35,9 +35,43 @@ func EnsureNamespace(ctx context.Context, c client.Client, name string) error {
 	return nil
 }
 
-// Apply upserts the object in cluster. For M3 we use a simple Get/Create/Update cycle
-// rather than SSA — controller-runtime's SSA helper needs a FieldManager configured
-// at manager level which we can add in M6 hardening.
+func prepareForUpdate(existing, obj client.Object) error {
+	existingLabels := existing.GetLabels()
+	if owner := existingLabels[ManagedByLabel]; owner != "" && owner != ManagedByValue {
+		return fmt.Errorf("refusing to update unmanaged object %s/%s", existing.GetNamespace(), existing.GetName())
+	}
+	obj.SetResourceVersion(existing.GetResourceVersion())
+	if desired, ok := obj.(*corev1.Service); ok {
+		current := existing.(*corev1.Service)
+		preserveServiceFields(current, desired)
+	}
+	return nil
+}
+
+func preserveServiceFields(current, desired *corev1.Service) {
+	desired.Spec.ClusterIP = current.Spec.ClusterIP
+	desired.Spec.ClusterIPs = append([]string(nil), current.Spec.ClusterIPs...)
+	desired.Spec.IPFamilies = append([]corev1.IPFamily(nil), current.Spec.IPFamilies...)
+	desired.Spec.IPFamilyPolicy = current.Spec.IPFamilyPolicy
+	desired.Spec.HealthCheckNodePort = current.Spec.HealthCheckNodePort
+	desired.Spec.AllocateLoadBalancerNodePorts = current.Spec.AllocateLoadBalancerNodePorts
+	for i := range desired.Spec.Ports {
+		for _, currentPort := range current.Spec.Ports {
+			if servicePortMatches(desired.Spec.Ports[i], currentPort) {
+				desired.Spec.Ports[i].NodePort = currentPort.NodePort
+				break
+			}
+		}
+	}
+}
+
+func servicePortMatches(a, b corev1.ServicePort) bool {
+	if a.Name != "" && b.Name != "" {
+		return a.Name == b.Name
+	}
+	return a.Port == b.Port && a.Protocol == b.Protocol
+}
+
 func Apply(ctx context.Context, c client.Client, obj client.Object) error {
 	// Read current by name/ns to decide create vs update.
 	key := client.ObjectKeyFromObject(obj)
@@ -56,8 +90,9 @@ func Apply(ctx context.Context, c client.Client, obj client.Object) error {
 	if err != nil {
 		return fmt.Errorf("get %s: %w", key, err)
 	}
-	// Preserve resourceVersion so Update succeeds.
-	obj.SetResourceVersion(existing.GetResourceVersion())
+	if err := prepareForUpdate(existing, obj); err != nil {
+		return err
+	}
 	if err := c.Update(ctx, obj); err != nil {
 		return fmt.Errorf("update %s: %w", key, err)
 	}

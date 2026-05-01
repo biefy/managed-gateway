@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,11 +23,12 @@ func TestGatewayHandlerEnqueuesObjectKey(t *testing.T) {
 	handler := newGatewayHandler(func(key types.NamespacedName) {
 		got = append(got, key)
 	})
-	gw := &gwapiv1.Gateway{ObjectMeta: metav1.ObjectMeta{Name: "gw", Namespace: "app"}}
+	oldGw := &gwapiv1.Gateway{ObjectMeta: metav1.ObjectMeta{Name: "gw", Namespace: "app", Generation: 1}}
+	newGw := &gwapiv1.Gateway{ObjectMeta: metav1.ObjectMeta{Name: "gw", Namespace: "app", Generation: 2}}
 
-	handler.OnAdd(gw, false)
-	handler.OnUpdate(nil, gw)
-	handler.OnDelete(clientgocache.DeletedFinalStateUnknown{Obj: gw})
+	handler.OnAdd(oldGw, false)
+	handler.OnUpdate(oldGw, newGw)
+	handler.OnDelete(clientgocache.DeletedFinalStateUnknown{Obj: newGw})
 
 	want := []types.NamespacedName{
 		{Namespace: "app", Name: "gw"},
@@ -38,19 +40,77 @@ func TestGatewayHandlerEnqueuesObjectKey(t *testing.T) {
 	}
 }
 
+func TestGatewayHandlerIgnoresStatusOnlyUpdate(t *testing.T) {
+	var got []types.NamespacedName
+	handler := newGatewayHandler(func(key types.NamespacedName) {
+		got = append(got, key)
+	})
+	oldGw := &gwapiv1.Gateway{ObjectMeta: metav1.ObjectMeta{Name: "gw", Namespace: "app", Generation: 1}}
+	newGw := oldGw.DeepCopy()
+	newGw.ResourceVersion = "2"
+
+	handler.OnUpdate(oldGw, newGw)
+
+	if len(got) != 0 {
+		t.Fatalf("processed status-only update: %#v", got)
+	}
+}
+
 func TestGatewayClassHandlerEnqueuesName(t *testing.T) {
 	var got []string
 	handler := newGatewayClassHandler(func(name string) {
 		got = append(got, name)
 	})
-	gc := &gwapiv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "appnet"}}
+	oldGC := &gwapiv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "appnet", Generation: 1}}
+	newGC := &gwapiv1.GatewayClass{ObjectMeta: metav1.ObjectMeta{Name: "appnet", Generation: 2}}
 
-	handler.OnAdd(gc, false)
-	handler.OnUpdate(nil, gc)
+	handler.OnAdd(oldGC, false)
+	handler.OnUpdate(oldGC, newGC)
 
 	want := []string{"appnet", "appnet"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("processed names = %#v, want %#v", got, want)
+	}
+}
+
+func TestGatewayProcessorRequeuesDirtyKey(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	key := types.NamespacedName{Namespace: "app", Name: "gw"}
+	calls := make(chan types.NamespacedName, 2)
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var mu sync.Mutex
+	callCount := 0
+	reconcile := func(context.Context, gwreconciler.Deps, types.NamespacedName) error {
+		mu.Lock()
+		callCount++
+		current := callCount
+		mu.Unlock()
+		calls <- key
+		if current == 1 {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		return nil
+	}
+	process := newGatewayProcessorWithReconcile(ctx, logr.Discard(), gwreconciler.Deps{}, reconcile)
+
+	process(key)
+	<-firstStarted
+	if got := <-calls; got != key {
+		t.Fatalf("first call key = %#v, want %#v", got, key)
+	}
+	process(key)
+	close(releaseFirst)
+
+	select {
+	case got := <-calls:
+		if got != key {
+			t.Fatalf("second call key = %#v, want %#v", got, key)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("dirty key was not requeued")
 	}
 }
 

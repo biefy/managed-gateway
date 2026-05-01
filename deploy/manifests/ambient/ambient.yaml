@@ -16,9 +16,6 @@ metadata:
     app: istiod
 spec:
   ports:
-    - name: grpc-xds
-      port: 15010
-      targetPort: 15010
     - name: grpc-xds-tls
       port: 15012
       targetPort: 15012
@@ -32,8 +29,6 @@ subsets:
   - addresses:
       - ip: __INFRA_NODE_IP__
     ports:
-      - name: grpc-xds
-        port: __ISTIOD_PLAINTEXT_NODEPORT__
       - name: grpc-xds-tls
         port: __ISTIOD_TLS_NODEPORT__
 ---

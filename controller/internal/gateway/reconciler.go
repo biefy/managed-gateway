@@ -5,6 +5,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -24,6 +25,11 @@ import (
 
 // ControllerName identifies which GatewayClasses this controller handles.
 const ControllerName = "gateway.azure.com/appnet-gateway.controller"
+
+const (
+	agentGatewayTokenExpiration = 12 * time.Hour
+	agentGatewayTokenRefresh    = 4 * time.Hour
+)
 
 // Deps bundles the inputs needed by Reconcile.
 type Deps struct {
@@ -50,7 +56,10 @@ func Reconcile(ctx context.Context, d Deps, key types.NamespacedName) error {
 	var gw gwapiv1.Gateway
 	if err := d.MemberClient.Get(ctx, key, &gw); err != nil {
 		if apierrors.IsNotFound(err) {
-			return deleteAgentGateway(ctx, d, key)
+			if err := deleteAgentGateway(ctx, d, key); err != nil {
+				return err
+			}
+			return RefreshIstiod(ctx, d)
 		}
 		return fmt.Errorf("get gateway: %w", err)
 	}
@@ -61,8 +70,24 @@ func Reconcile(ctx context.Context, d Deps, key types.NamespacedName) error {
 		return err
 	}
 	if !handled {
-		logger.V(1).Info("skipping; not ours")
-		return nil
+		logger.V(1).Info("cleaning up gateway no longer handled by this controller")
+		if err := deleteAgentGateway(ctx, d, key); err != nil {
+			return err
+		}
+		return RefreshIstiod(ctx, d)
+	}
+
+	if err := status.MarkAccepted(ctx, d.MemberClient, &gw); err != nil {
+		return fmt.Errorf("write accepted status: %w", err)
+	}
+	if err := validateGatewayTLSAssets(ctx, d, &gw); err != nil {
+		var listenerErr *listenerRefsError
+		if errors.As(err, &listenerErr) {
+			if statusErr := status.MarkListenerResolvedRefs(ctx, d.MemberClient, &gw, listenerErr.listener, metav1.ConditionFalse, listenerErr.reason, listenerErr.message); statusErr != nil {
+				return fmt.Errorf("write listener resolved refs status: %w", statusErr)
+			}
+		}
+		return err
 	}
 
 	// Provision agentgateway Deployment + Service in the infra cluster.
@@ -75,9 +100,11 @@ func Reconcile(ctx context.Context, d Deps, key types.NamespacedName) error {
 	if err := provisioner.Apply(ctx, d.InfraClient, provisioner.AgentGatewayServiceAccountObject(params)); err != nil {
 		return fmt.Errorf("apply agentgateway serviceaccount: %w", err)
 	}
-	if err := ensureAgentGatewayMemberToken(ctx, d, &gw); err != nil {
+	tokenExpiration, err := ensureAgentGatewayMemberToken(ctx, d, &gw)
+	if err != nil {
 		return err
 	}
+	params.TokenExpiration = tokenExpiration
 	if err := provisioner.Apply(ctx, d.InfraClient, provisioner.AgentGatewayDeployment(params)); err != nil {
 		return fmt.Errorf("apply agentgateway deployment: %w", err)
 	}
@@ -90,11 +117,6 @@ func Reconcile(ctx context.Context, d Deps, key types.NamespacedName) error {
 	// roll the infra-side Secret mounts.
 	if err := RefreshIstiod(ctx, d); err != nil {
 		logger.Error(err, "refresh istiod tls mounts")
-	}
-
-	// Write Accepted=True. Programmed depends on agentgateway pod readiness.
-	if err := status.MarkAccepted(ctx, d.MemberClient, &gw); err != nil {
-		return fmt.Errorf("write status: %w", err)
 	}
 
 	depKey := types.NamespacedName{
@@ -193,23 +215,147 @@ func addressType(t gwapiv1.AddressType) *gwapiv1.AddressType {
 	return &t
 }
 
-func ensureAgentGatewayMemberToken(ctx context.Context, d Deps, gw *gwapiv1.Gateway) error {
-	labels := map[string]string{
-		provisioner.ManagedByLabel: provisioner.ManagedByValue,
-		provisioner.TenantLabel:    d.Tenant,
+type listenerRefsError struct {
+	listener gwapiv1.SectionName
+	reason   gwapiv1.ListenerConditionReason
+	message  string
+}
+
+func (e *listenerRefsError) Error() string {
+	return e.message
+}
+
+func validateGatewayTLSAssets(ctx context.Context, d Deps, gw *gwapiv1.Gateway) error {
+	for _, listener := range gw.Spec.Listeners {
+		refs, required := listenerCertificateRefs(listener)
+		if !required {
+			continue
+		}
+		if len(refs) == 0 {
+			return &listenerRefsError{listener: listener.Name, reason: gwapiv1.ListenerReasonInvalidCertificateRef, message: "Listener requires a certificateRef"}
+		}
+		for _, ref := range refs {
+			name, ok := secretObjectReferenceName(ref)
+			if !ok {
+				return &listenerRefsError{listener: listener.Name, reason: gwapiv1.ListenerReasonInvalidCertificateRef, message: fmt.Sprintf("certificateRef %s must reference a core Secret", ref.Name)}
+			}
+			if !gatewaySecretReferencePermitted(ctx, d.MemberClient, gw, ref) {
+				return &listenerRefsError{listener: listener.Name, reason: gwapiv1.ListenerReasonRefNotPermitted, message: fmt.Sprintf("certificateRef %s is not permitted", ref.Name)}
+			}
+			if err := requireInfraSecretKeys(ctx, d.InfraClient, d.InfraNamespace, name, "tls.crt", "tls.key"); err != nil {
+				return &listenerRefsError{listener: listener.Name, reason: gwapiv1.ListenerReasonInvalidCertificateRef, message: fmt.Sprintf("certificateRef %s: %v", ref.Name, err)}
+			}
+		}
 	}
+	if gw.Spec.TLS != nil && gw.Spec.TLS.Backend != nil && gw.Spec.TLS.Backend.ClientCertificateRef != nil {
+		ref := *gw.Spec.TLS.Backend.ClientCertificateRef
+		name, ok := secretObjectReferenceName(ref)
+		if !ok {
+			return fmt.Errorf("backend clientCertificateRef %s must reference a core Secret", ref.Name)
+		}
+		if !gatewaySecretReferencePermitted(ctx, d.MemberClient, gw, ref) {
+			return fmt.Errorf("backend clientCertificateRef %s is not permitted", ref.Name)
+		}
+		if err := requireInfraSecretKeys(ctx, d.InfraClient, d.InfraNamespace, name, "tls.crt", "tls.key"); err != nil {
+			return fmt.Errorf("backend clientCertificateRef %s: %w", ref.Name, err)
+		}
+	}
+	return nil
+}
+
+func listenerCertificateRefs(listener gwapiv1.Listener) ([]gwapiv1.SecretObjectReference, bool) {
+	if listener.Protocol != gwapiv1.HTTPSProtocolType && listener.Protocol != gwapiv1.TLSProtocolType {
+		return nil, false
+	}
+	if listener.Protocol == gwapiv1.TLSProtocolType && listener.TLS == nil {
+		return nil, false
+	}
+	if listener.TLS != nil && listener.TLS.Mode != nil && *listener.TLS.Mode == gwapiv1.TLSModePassthrough {
+		return nil, false
+	}
+	if listener.TLS == nil {
+		return nil, true
+	}
+	return listener.TLS.CertificateRefs, true
+}
+
+func requireInfraSecretKeys(ctx context.Context, c client.Client, namespace, name string, keys ...string) error {
+	var secret corev1.Secret
+	if err := c.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("infra Secret not found")
+		}
+		return err
+	}
+	for _, key := range keys {
+		if len(secret.Data[key]) == 0 {
+			return fmt.Errorf("infra Secret missing %s", key)
+		}
+	}
+	return nil
+}
+
+func gatewaySecretReferencePermitted(ctx context.Context, c client.Client, gw *gwapiv1.Gateway, ref gwapiv1.SecretObjectReference) bool {
+	namespace := gwapiv1.Namespace(gw.Namespace)
+	if ref.Namespace != nil {
+		namespace = *ref.Namespace
+	}
+	if namespace == gwapiv1.Namespace(gw.Namespace) {
+		return true
+	}
+	var grants gwapiv1.ReferenceGrantList
+	if err := c.List(ctx, &grants, client.InNamespace(string(namespace))); err != nil {
+		return false
+	}
+	for _, grant := range grants.Items {
+		if gatewayReferenceGrantAllows(grant, gwapiv1.Namespace(gw.Namespace), ref.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+func gatewayReferenceGrantAllows(grant gwapiv1.ReferenceGrant, fromNamespace gwapiv1.Namespace, toName gwapiv1.ObjectName) bool {
+	for _, from := range grant.Spec.From {
+		if from.Group != gwapiv1.Group(gwapiv1.GroupVersion.Group) || from.Kind != "Gateway" || from.Namespace != fromNamespace {
+			continue
+		}
+		for _, to := range grant.Spec.To {
+			if to.Group == "" && to.Kind == "Secret" && (to.Name == nil || *to.Name == toName) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func ensureAgentGatewayMemberToken(ctx context.Context, d Deps, gw *gwapiv1.Gateway) (string, error) {
+	labels := provisioner.AgentGatewayLabels(d.Tenant, gw)
 	memberSA := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      provisioner.AgentGatewayServiceAccount,
 			Namespace: gw.Namespace,
-			Labels:    labels,
+			Labels: map[string]string{
+				provisioner.ManagedByLabel: provisioner.ManagedByValue,
+				provisioner.TenantLabel:    d.Tenant,
+			},
 		},
 	}
 	if err := provisioner.Apply(ctx, d.MemberClient, memberSA); err != nil {
-		return fmt.Errorf("apply member agentgateway serviceaccount: %w", err)
+		return "", fmt.Errorf("apply member agentgateway serviceaccount: %w", err)
 	}
 
-	expirationSeconds := int64(43200)
+	secretKey := types.NamespacedName{Namespace: d.InfraNamespace, Name: provisioner.AgentGatewayTokenSecretName(gw)}
+	var existing corev1.Secret
+	if err := d.InfraClient.Get(ctx, secretKey, &existing); err == nil {
+		if tokenSecretCurrent(&existing, time.Now()) {
+			return existing.Annotations[provisioner.MemberTokenExpirationAnnotation], nil
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return "", fmt.Errorf("get infra agentgateway token secret: %w", err)
+	}
+
+	expirationSeconds := int64(agentGatewayTokenExpiration.Seconds())
 	tokenRequest := &authv1.TokenRequest{
 		Spec: authv1.TokenRequestSpec{
 			Audiences:         []string{"istio-ca"},
@@ -217,46 +363,85 @@ func ensureAgentGatewayMemberToken(ctx context.Context, d Deps, gw *gwapiv1.Gate
 		},
 	}
 	if err := d.MemberClient.SubResource("token").Create(ctx, memberSA, tokenRequest); err != nil {
-		return fmt.Errorf("create member agentgateway token: %w", err)
+		return "", fmt.Errorf("create member agentgateway token: %w", err)
 	}
 	if tokenRequest.Status.Token == "" {
-		return fmt.Errorf("create member agentgateway token: empty token")
+		return "", fmt.Errorf("create member agentgateway token: empty token")
+	}
+	if tokenRequest.Status.ExpirationTimestamp.IsZero() {
+		return "", fmt.Errorf("create member agentgateway token: empty expiration")
 	}
 
+	expires := tokenRequest.Status.ExpirationTimestamp.UTC().Format(time.RFC3339)
+	annotations := provisioner.AgentGatewayAnnotations(gw)
+	annotations[provisioner.MemberTokenExpirationAnnotation] = expires
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      provisioner.AgentGatewayTokenSecretName(gw),
-			Namespace: d.InfraNamespace,
-			Labels:    labels,
+			Name:        secretKey.Name,
+			Namespace:   secretKey.Namespace,
+			Labels:      labels,
+			Annotations: annotations,
 		},
 		Type:       corev1.SecretTypeOpaque,
 		StringData: map[string]string{"token": tokenRequest.Status.Token},
 	}
 	if err := provisioner.Apply(ctx, d.InfraClient, secret); err != nil {
-		return fmt.Errorf("apply infra agentgateway token secret: %w", err)
+		return "", fmt.Errorf("apply infra agentgateway token secret: %w", err)
 	}
-	return nil
+	return expires, nil
+}
+
+func tokenSecretCurrent(secret *corev1.Secret, now time.Time) bool {
+	if len(secret.Data["token"]) == 0 {
+		return false
+	}
+	expires, ok := secret.Annotations[provisioner.MemberTokenExpirationAnnotation]
+	if !ok || expires == "" {
+		return false
+	}
+	expiration, err := time.Parse(time.RFC3339, expires)
+	if err != nil {
+		return false
+	}
+	return expiration.After(now.Add(agentGatewayTokenRefresh))
 }
 
 func deleteAgentGateway(ctx context.Context, d Deps, key types.NamespacedName) error {
-	// The Gateway is gone in member cluster; delete the infra-cluster Deployment/Service by label.
 	stubGw := &gwapiv1.Gateway{}
 	stubGw.Namespace = key.Namespace
 	stubGw.Name = key.Name
 	params := provisioner.GatewayParams{InfraNamespace: d.InfraNamespace, Platform: d.Platform, Gateway: stubGw}
-	dep := provisioner.AgentGatewayDeployment(params)
-	svc := provisioner.AgentGatewayService(params)
-	if err := d.InfraClient.Delete(ctx, dep); err != nil && !apierrors.IsNotFound(err) {
+	if err := deleteManagedGatewayObject(ctx, d.InfraClient, provisioner.AgentGatewayDeployment(params), key); err != nil {
 		return fmt.Errorf("delete deployment: %w", err)
 	}
-	if err := d.InfraClient.Delete(ctx, svc); err != nil && !apierrors.IsNotFound(err) {
+	if err := deleteManagedGatewayObject(ctx, d.InfraClient, provisioner.AgentGatewayService(params), key); err != nil {
 		return fmt.Errorf("delete service: %w", err)
 	}
 	tokenSecret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: provisioner.AgentGatewayTokenSecretName(stubGw), Namespace: d.InfraNamespace}}
-	if err := d.InfraClient.Delete(ctx, tokenSecret); err != nil && !apierrors.IsNotFound(err) {
+	if err := deleteManagedGatewayObject(ctx, d.InfraClient, tokenSecret, key); err != nil {
 		return fmt.Errorf("delete token secret: %w", err)
 	}
 	return nil
+}
+
+func deleteManagedGatewayObject(ctx context.Context, c client.Client, obj client.Object, key types.NamespacedName) error {
+	if err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	if obj.GetLabels()[provisioner.ManagedByLabel] != provisioner.ManagedByValue {
+		return nil
+	}
+	annotations := obj.GetAnnotations()
+	if annotations[provisioner.GatewayNSAnnotation] != "" && annotations[provisioner.GatewayNSAnnotation] != key.Namespace {
+		return nil
+	}
+	if annotations[provisioner.GatewayNameAnnotation] != "" && annotations[provisioner.GatewayNameAnnotation] != key.Name {
+		return nil
+	}
+	return c.Delete(ctx, obj)
 }
 
 func isOurs(ctx context.Context, c client.Client, gw *gwapiv1.Gateway) (bool, error) {

@@ -46,17 +46,22 @@ spec:
     spec:
       serviceAccountName: eastwest-gateway
       automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       nodeSelector:
         kubernetes.io/os: linux
       containers:
         - name: agentgateway
-          image: akstraffic.azurecr.io/mgdgtw/agentgateway:dev
+          image: __AGENTGATEWAY_IMAGE__
           imagePullPolicy: Always
           env:
             - name: LOCAL_XDS_PATH
               value: /etc/agentgateway/config.yaml
             - name: XDS_ADDRESS
-              value: http://istiod.istio-system.svc:15010
+              value: https://istiod.istio-system.svc:15012
+            - name: XDS_ROOT_CA
+              value: /var/run/secrets/istio/root-cert.pem
             - name: NAMESPACE
               value: istio-system
             - name: GATEWAY
@@ -94,6 +99,8 @@ spec:
             - name: istiod-ca-cert
               mountPath: /var/run/secrets/istio
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: 100m
@@ -103,7 +110,10 @@ spec:
               memory: 512Mi
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsGroup: 1337
             runAsNonRoot: true
+            runAsUser: 1337
             capabilities:
               drop: [ALL]
       volumes:
@@ -123,6 +133,8 @@ spec:
             readOnly: true
             volumeAttributes:
               secretProviderClass: istio-root-cert-keyvault
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

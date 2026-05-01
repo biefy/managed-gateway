@@ -69,7 +69,7 @@ ensure_kv_identity() {
   az keyvault set-policy \
     --name "${AKS_KEYVAULT_NAME}" \
     --object-id "${principal_id}" \
-    --secret-permissions get list \
+    --secret-permissions get \
     --output none
 }
 
@@ -86,7 +86,7 @@ if [[ -n "${principal_id}" ]]; then
   az keyvault set-policy \
     --name "${AKS_KEYVAULT_NAME}" \
     --object-id "${principal_id}" \
-    --secret-permissions get list set delete recover purge backup restore \
+    --secret-permissions get set \
     --output none
 fi
 

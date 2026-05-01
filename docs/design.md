@@ -52,7 +52,7 @@ flowchart TB
 ## Non-goals in the current MVP
 
 - A production tenant/member registration API.
-- Full production RBAC hardening for member-cluster access.
+- Fully reviewed tenant-specific RBAC and onboarding automation for member-cluster access.
 - Complete Gateway API v1.5 conformance.
 - Multi-region, multi-VNet, cross-subscription, or private-link deployment models.
 - Managed lifecycle for CA rotation, revocation, and emergency rollover beyond the AKS scripts.
@@ -69,14 +69,16 @@ Responsibilities:
 1. Load a member-cluster kubeconfig from an infra-cluster Secret.
 2. Start a controller-runtime cache against the member cluster.
 3. Watch Gateway API resources in the member cluster.
-4. Provision infra-cluster objects for accepted member Gateways:
+4. Validate Gateway API attachment, backend, ReferenceGrant, and declared TLS material before programming data planes.
+5. Provision infra-cluster objects for accepted member Gateways:
    - `ServiceAccount` for agentgateway.
    - projected member-cluster Istio token Secret for agentgateway.
    - `Deployment` for agentgateway.
    - `Service` exposing agentgateway.
-5. Render and refresh the tenant Istiod Deployment and Service.
-6. Mount infra-cluster TLS assets into tenant Istiod based on Gateway listener `certificateRefs`, Gateway backend `clientCertificateRef`, and `BackendTLSPolicy` CA refs.
-7. Write basic Gateway and listener status back to the member cluster.
+6. Clean up managed infra objects when a Gateway is deleted or no longer targets this controller.
+7. Render and refresh the tenant Istiod Deployment and Service.
+8. Mount infra-cluster TLS assets into tenant Istiod based on Gateway listener `certificateRefs`, Gateway backend `clientCertificateRef`, and `BackendTLSPolicy` CA refs.
+9. Write GatewayClass, Gateway, listener, and Route parent status back to the member cluster.
 
 ```mermaid
 sequenceDiagram
@@ -88,9 +90,10 @@ sequenceDiagram
 
     Member-->>Controller: Gateway / Route / Policy event
     Controller->>Member: Read Gateway and GatewayClass
+    Controller->>Member: Set Gateway and listener Accepted=True, Programmed=Unknown
+    Controller->>Member: Validate Route attachment, ReferenceGrant, and TLS refs
     Controller->>Infra: Apply agentgateway ServiceAccount, token Secret, Deployment, Service
     Controller->>Infra: Re-render tenant Istiod Deployment with TLS mounts
-    Controller->>Member: Set Gateway and listener Accepted=True, Programmed=Unknown
     Controller->>Infra: Wait for agentgateway Deployment availability
     Controller->>Infra: Wait for LoadBalancer address
     Istiod-->>Agent: xDS resources for one Gateway role
@@ -112,10 +115,11 @@ The controller uses leader election, so multiple replicas can be deployed but on
 - `ReferenceGrant`
 - `BackendTLSPolicy`
 - `ListenerSet`
+- core `ConfigMap`, `Namespace`, `Secret`, and `Service`
 
-`Gateway` events enqueue the changed Gateway directly. Other Gateway API resource events enqueue all Gateways so that route, policy, and reference changes trigger a refresh of the infra data plane and tenant Istiod mount set.
+`Gateway` events enqueue the changed Gateway directly. Other Gateway API and core resource events enqueue all Gateways so that route, policy, reference, Service, Secret, ConfigMap, and Namespace changes trigger a refresh of the infra data plane and tenant Istiod mount set. Update handlers ignore status-only updates by checking generation/deletion-state changes, and Gateway processing uses a per-key dirty bit so an event received while a reconcile is running is retried instead of dropped.
 
-This is intentionally simple: the MVP favors correctness and fast iteration over a precise reverse index from each Route/Policy/ReferenceGrant to affected Gateways. A production controller should replace the global refresh with indexed enqueueing and stronger backoff behavior.
+A periodic refresh also enqueues all Gateways so member token refresh and other time-based checks do not depend on spec changes. The fanout model is intentionally simple: the MVP favors correctness and fast iteration over a precise reverse index from each Route/Policy/ReferenceGrant/Service/Secret/Namespace to affected Gateways. A production controller should replace the global refresh with indexed enqueueing and stronger backoff behavior.
 
 ### Gateway reconciler
 
@@ -134,15 +138,17 @@ For each handled Gateway, it renders provider-owned infra-cluster resources usin
 - `AgentGatewayDeployment`
 - `AgentGatewayService`
 
-The infra object name for a member Gateway is stable:
+The infra object name for a member Gateway is stable and DNS-label-safe:
 
 ```text
 gw-<gateway-namespace>-<gateway-name>
 ```
 
-For example, member Gateway `demo/demo-gw` becomes infra Deployment and Service `gw-demo-demo-gw` in the tenant namespace.
+For example, member Gateway `demo/demo-gw` becomes infra Deployment and Service `gw-demo-demo-gw` in the tenant namespace. Long or non-DNS-safe names are sanitized, truncated, and suffixed with a stable hash; the full original Gateway namespace/name is preserved in source annotations.
 
-The reconciler then calls `RefreshIstiod` so Istiod's mounted TLS Secret set matches the union of all handled Gateways and backend TLS policies for the tenant. After provisioning agentgateway, reconciliation waits briefly for the infra Deployment to report an available replica and for the infra LoadBalancer Service to receive an address before promoting Gateway and listener `Programmed=True`; if the data plane or address is still pending, the member event processor retries reconciliation.
+Before provisioning, the reconciler validates declared Gateway TLS refs and required infra Secret keys. Missing or unauthorized listener certificate material prevents `Programmed=True` and writes listener `ResolvedRefs=False` with the appropriate Gateway API reason. The reconciler then calls `RefreshIstiod` so Istiod's mounted TLS Secret set matches the union of all handled Gateways and backend TLS policies for the tenant. After provisioning agentgateway, reconciliation waits briefly for the infra Deployment to report an available replica and for the infra LoadBalancer Service to receive an address before promoting Gateway and listener `Programmed=True`; if the data plane or address is still pending, the member event processor retries reconciliation.
+
+When a Gateway is deleted or changes to a GatewayClass not owned by this controller, the reconciler deletes only matching managed Deployment, Service, and token Secret objects, then refreshes Istiod so stale mounts are removed. The member-cluster Istio token stored in the infra token Secret includes expiration metadata; reconciliation reuses fresh tokens, refreshes tokens near expiry, and stamps the Deployment pod template with the token expiration to trigger a rollout when a token rotates.
 
 ### Provisioner
 
@@ -152,9 +158,11 @@ Important invariants:
 
 - Managed pods set `automountServiceAccountToken: false` so neither tenant Istiod nor agentgateway receives an infra-cluster API token by default.
 - Objects are labeled with `app.kubernetes.io/managed-by=appnet-gateway-controller` for ownership and future garbage collection.
+- Per-Gateway objects also carry source Gateway annotations so cleanup avoids unrelated objects with colliding names.
 - AKS mode renders Azure LoadBalancer Services.
 - Tenant Istiod runs with a member-cluster kubeconfig mounted from the infra namespace.
-- Tenant Istiod mounts provider-side TLS assets under `/var/run/tls/<name>/`.
+- Tenant Istiod mounts provider-side TLS assets under `/var/run/tls/<name>/`; declared TLS asset mounts are required, while fallback/default CA material remains explicitly optional only where intended.
+- Service updates preserve Kubernetes-assigned fields such as ClusterIP, IP families, NodePorts, health-check NodePort, and load-balancer node-port allocation settings.
 
 Tenant Istiod environment includes:
 
@@ -174,8 +182,8 @@ The forked Istiod watches the member cluster and builds the service, endpoint, w
 Key fork behavior:
 
 - It uses Gateway API v1.5 Go types for runtime Gateway API clients and KRT collections.
-- It exposes xDS to agentgateway on plaintext port `15010` inside the infra tenant namespace.
-- It exposes secure xDS/CA services on `15012` for member ztunnel and east-west gateways.
+- It exposes secure xDS/CA services on `15012` for infra agentgateway, member ztunnel, and east-west gateways.
+- The AKS manifests keep plaintext xDS port `15010` off rendered Services; any remaining listener is an Istiod process-local compatibility surface.
 - It has an additional agentgateway resource generator that translates Gateway API resources into agentgateway ADP resources.
 - It keeps ambient support enabled so member workloads and services are represented as workload/address resources.
 
@@ -185,7 +193,8 @@ agentgateway is the managed north-south data plane. The controller deploys one a
 
 The Deployment receives these identity and routing inputs through environment variables:
 
-- `XDS_ADDRESS=http://istiod.<tenant-namespace>.svc.cluster.local:15010`
+- `XDS_ADDRESS=https://istiod.<tenant-namespace>.svc.cluster.local:15012`
+- `XDS_ROOT_CA=/var/run/secrets/istio/root-cert.pem`
 - `NAMESPACE=<member-gateway-namespace>`
 - `GATEWAY=<member-gateway-name>`
 - `CLUSTER_ID=<tenant-name>`
@@ -328,7 +337,9 @@ This models TLS passthrough separately from HTTPS termination.
 
 ### Backend refs
 
-The translator currently supports Kubernetes `Service` backend refs. It builds agentgateway service backend hostnames as:
+The translator currently supports Kubernetes `Service` backend refs. The controller validates that each backend ref uses the core `Service` kind, includes a port, references an existing Service, and names an existing Service port. Cross-namespace backend refs require a matching `ReferenceGrant` in the backend namespace.
+
+The translator builds agentgateway service backend hostnames as:
 
 ```text
 <service>.<namespace>.svc.cluster.local
@@ -389,7 +400,7 @@ listeners:
       name: alice-https-cert
 ```
 
-The Secret exists in the infra tenant namespace, not in the member cluster. `RefreshIstiod` adds the Secret name to the tenant Istiod mount set, and the provisioner mounts the full Secret into the Istiod pod at:
+The Secret exists in the infra tenant namespace, not in the member cluster. Same-namespace Gateway certificate refs are allowed directly; cross-namespace certificate refs require a matching member-cluster `ReferenceGrant` in the referenced namespace. The controller verifies that the infra Secret exists and contains `tls.crt` and `tls.key` before programming the Gateway. `RefreshIstiod` adds the Secret name to the tenant Istiod mount set, and the provisioner mounts the full Secret into the Istiod pod at:
 
 ```text
 /var/run/tls/alice-https-cert/
@@ -440,7 +451,7 @@ spec:
         name: alice-backend-mtls
 ```
 
-The infra tenant Secret contains the client `tls.crt`, `tls.key`, and optional `ca.crt`. Tenant Istiod mounts it under `/var/run/tls/alice-backend-mtls/`. The translator reads the client cert and key and attaches them to backend TLS policies, so agentgateway presents the client certificate when connecting to the backend.
+The infra tenant Secret contains the client `tls.crt`, `tls.key`, and optional `ca.crt`. The controller validates the referenced core Secret and cross-namespace permission before programming. Tenant Istiod mounts it under `/var/run/tls/alice-backend-mtls/`. The translator reads the client cert and key and attaches them to backend TLS policies, so agentgateway presents the client certificate when connecting to the backend.
 
 The AKS Alice sample uses nginx on port `8443` with `ssl_verify_client on`, proving that direct clients without a cert are rejected while managed gateway traffic succeeds over backend mTLS.
 
@@ -451,7 +462,7 @@ The AKS scripts are under `deploy/aks/`.
 High-level flow:
 
 1. `common.sh` defines defaults such as resource group, location, Key Vault, ACR, and Gateway API version.
-2. `up.sh` creates or prepares AKS clusters and installs Gateway API v1.5 Standard CRDs into member clusters.
+2. `up.sh` creates or prepares AKS clusters, limits public Internet NSG ingress to managed gateway ports `80` and `443`, and installs Gateway API v1.5 Standard CRDs into member clusters.
 3. `ca.sh` materializes the shared root and per-member intermediate CA hierarchy from Azure Key Vault using Secrets Store CSI and AKS Workload Identity.
 4. `ambient-up.sh` installs member ambient components through tenant Istiod.
 5. `e2e.sh` performs the full validation:
@@ -469,23 +480,24 @@ High-level flow:
    - checks gateway logs for missing network gateway warnings;
    - validates controller leader failover.
 
-Image builds for controller, Istiod, and agentgateway should be performed through the devbox workflow, not local Docker on the workstation.
+Image build scripts default to local Docker builds and only push when `PUSH=1` is set. AKS scripts use local image placeholders by default; shared-cluster runs should pass promoted image references through `CONTROLLER_IMAGE` and `AGENTGATEWAY_IMAGE`.
 
 ## Status and conformance
 
-The current controller writes basic GatewayClass, Gateway, listener, and route attachment status:
+The current controller writes GatewayClass, Gateway, listener, and route attachment status:
 
 - GatewayClass `Accepted=True` for classes whose `spec.controllerName` matches this controller
 - GatewayClass `supportedFeatures` for the Standard features currently advertised by the conformance harness
 - Gateway `Accepted=True`
-- Gateway `Programmed=Unknown` while the infra agentgateway Deployment is pending
-- Gateway `Programmed=True` once the infra agentgateway Deployment has an available replica and the infra LoadBalancer address is copied into `Gateway.status.addresses`
+- Gateway `Programmed=Unknown` while required references or the infra agentgateway Deployment are pending
+- Gateway `Programmed=True` once required TLS material is valid, the infra agentgateway Deployment has an available replica, and the infra LoadBalancer address is copied into `Gateway.status.addresses`
 - listener `Accepted=True`
 - listener `Programmed=Unknown` while the infra agentgateway Deployment is pending
 - listener `Programmed=True`
-- listener `ResolvedRefs=True` for currently supported listener references
+- listener `ResolvedRefs=True` for supported and valid listener references
+- listener `ResolvedRefs=False` for invalid or unauthorized certificate refs
 - listener `SupportedKinds` derived from listener protocol
-- `HTTPRoute`, `GRPCRoute`, and `TLSRoute` parent status `Accepted=True` and `ResolvedRefs=True` for routes that attach to a handled Gateway listener
+- `HTTPRoute`, `GRPCRoute`, and `TLSRoute` parent status reflects listener matching, `allowedRoutes`, hostname intersection, supported route kinds, backend Service resolution, and cross-namespace backend `ReferenceGrant` checks
 
 Current `SupportedKinds` behavior:
 
@@ -523,7 +535,7 @@ Example smoke run:
 GATEWAY_API_CONFORMANCE_RUN_TEST=HTTPRouteSimpleSameNamespace hack/gateway-api-conformance.sh
 ```
 
-Additional conformance work remains for invalid/negative Route status cases, `ReferenceGrant` enforcement, partial-invalid behavior, unsupported filter reporting, ListenerSet semantics, and the full Standard feature matrix.
+Additional conformance work remains for broader partial-invalid behavior, unsupported filter reporting, ListenerSet semantics, BackendTLSPolicy status, and the full Standard feature matrix.
 
 ## Testing
 
@@ -537,6 +549,12 @@ Conformance package compile check without running cluster tests:
 
 ```bash
 go test -tags conformance ./controller/internal/conformance -run '^$'
+```
+
+Full local static check entrypoint used by CI:
+
+```bash
+hack/static-checks.sh
 ```
 
 Istio translator tests, run from a `github.com/biefy/istio` checkout:
@@ -574,8 +592,10 @@ The design relies on these boundaries:
 - agentgateway receives a member-cluster token only for Istio CA identity, not an infra-cluster service account token.
 - Tenant Istiod uses a member kubeconfig Secret to watch member resources but does not receive an infra-cluster pod token.
 - AKS CA material is mounted from Key Vault through Secrets Store CSI and Workload Identity.
+- agentgateway xDS uses TLS on port `15012`; plaintext `15010` is not exposed through the rendered Services.
+- The e2e member-cluster bootstrap uses a dedicated read/status ClusterRole instead of `cluster-admin`.
 
-Production hardening still needs least-privilege member RBAC, kubeconfig rotation, auditable tenant onboarding, immutable image release promotion, and a formal security review of the Istio and agentgateway forks.
+Production hardening still needs reviewed tenant-specific RBAC, kubeconfig rotation, auditable tenant onboarding, immutable image release promotion, tighter Key Vault scoping, and a formal security review of the Istio and agentgateway forks.
 
 ## Design tradeoffs
 

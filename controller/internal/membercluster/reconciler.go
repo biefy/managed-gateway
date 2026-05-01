@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -54,6 +55,10 @@ func Start(parent context.Context, cfg CacheConfig) (*Client, error) {
 	}
 
 	for _, obj := range []client.Object{
+		&corev1.ConfigMap{},
+		&corev1.Namespace{},
+		&corev1.Secret{},
+		&corev1.Service{},
 		&gwapiv1.BackendTLSPolicy{},
 		&gwapiv1.GRPCRoute{},
 		&gwapiv1.Gateway{},
@@ -103,6 +108,10 @@ func Start(parent context.Context, cfg CacheConfig) (*Client, error) {
 	}
 	refreshHandler := newGatewayRefreshHandler(parent, logger, cli, processGateway)
 	for _, obj := range []client.Object{
+		&corev1.ConfigMap{},
+		&corev1.Namespace{},
+		&corev1.Secret{},
+		&corev1.Service{},
 		&gwapiv1.BackendTLSPolicy{},
 		&gwapiv1.GRPCRoute{},
 		&gwapiv1.GatewayClass{},
@@ -119,6 +128,7 @@ func Start(parent context.Context, cfg CacheConfig) (*Client, error) {
 			return nil, fmt.Errorf("add refresh handler %T: %w", obj, err)
 		}
 	}
+	startGatewayPeriodicRefresh(parent, logger, cli, processGateway)
 
 	go func() {
 		if err := c.Start(parent); err != nil && parent.Err() == nil {

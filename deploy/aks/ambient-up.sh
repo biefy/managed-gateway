@@ -10,6 +10,7 @@ select_subscription
 
 AMBIENT_TEMPLATE="${REPO_ROOT}/deploy/manifests/ambient/ambient.yaml"
 EASTWEST_TEMPLATE="${REPO_ROOT}/deploy/manifests/ambient/eastwest-gateway.yaml"
+AGENTGATEWAY_IMAGE="${AGENTGATEWAY_IMAGE:-managed-gateway/agentgateway:local}"
 
 wait_lb_ip() {
   local context="$1"
@@ -57,7 +58,6 @@ install_ambient() {
     "topology.istio.io/network=${cluster_id}" --overwrite >/dev/null
 
   sed -e "s/__INFRA_NODE_IP__/${istiod_ip}/g" \
-      -e "s/__ISTIOD_PLAINTEXT_NODEPORT__/15010/g" \
       -e "s/__ISTIOD_TLS_NODEPORT__/15012/g" \
       -e "s/__CA_CLUSTER_ID__/${ca_cluster_id}/g" \
       -e "s/__WORKLOAD_IDENTITY_CLIENT_ID__/${workload_identity_client_id}/g" \
@@ -68,6 +68,7 @@ install_ambient() {
       -e "s/__CA_CLUSTER_ID__/${ca_cluster_id}/g" \
       -e "s/__NETWORK__/${cluster_id}/g" \
       -e "s/__WORKLOAD_IDENTITY_CLIENT_ID__/${workload_identity_client_id}/g" \
+      -e "s#__AGENTGATEWAY_IMAGE__#${AGENTGATEWAY_IMAGE}#g" \
       "${EASTWEST_TEMPLATE}" \
     | kubectl --context "${member_context}" apply -f - >/dev/null
 

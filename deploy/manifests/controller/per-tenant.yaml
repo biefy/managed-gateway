@@ -1,7 +1,7 @@
 # Per-tenant controller manifests. Stamp this template once per tenant by
 # substituting __TENANT_NAME__ and __INFRA_NAMESPACE__:
 #
-#   sed -e 's/__TENANT_NAME__/alice/g' -e 's/__INFRA_NAMESPACE__/tenant-alice/g' \
+#   sed -e 's/__TENANT_NAME__/alice/g' -e 's/__INFRA_NAMESPACE__/tenant-alice/g' -e 's#__CONTROLLER_IMAGE__#managed-gateway/controller:local#g' \
 #       deploy/manifests/controller/per-tenant.yaml | kubectl --context aks-infra apply -f -
 #
 # Each tenant gets its own ServiceAccount, Role, RoleBinding, and Deployment
@@ -78,7 +78,7 @@ spec:
       terminationGracePeriodSeconds: 15
       containers:
         - name: controller
-          image: akstraffic.azurecr.io/mgdgtw/controller:dev
+          image: __CONTROLLER_IMAGE__
           imagePullPolicy: Always
           args:
             - --leader-elect=true
